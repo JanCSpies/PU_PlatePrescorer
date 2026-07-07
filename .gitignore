@@ -1,0 +1,31 @@
+# --- Python / uv ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Large / licensed data: NOT committed (regenerated or externally sourced) ---
+# Keep the folder structure and small pointer/provenance files only.
+datasets/raw/**
+!datasets/raw/**/location.md
+datasets/processed/*.csv
+datasets/processed/*.parquet
+datasets/processed/*.npz
+!datasets/processed/split_report.json
+
+# --- Literature PDFs: copyrighted, do not redistribute (notes in docs/ are ours) ---
+literature/**/*.pdf
+
+# --- Model / experiment artifacts ---
+artifacts/
+*.cbm
+*.joblib
+*.pt
+mlruns/
+
+# --- OS ---
+.DS_Store
