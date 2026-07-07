@@ -55,13 +55,38 @@ class BaggingPULearner(PULearner):
         self._models: list[FeasibilityModel] = []
         self.oob_scores_: np.ndarray = np.empty(0)
 
-    def fit(self, features: np.ndarray, selection: np.ndarray) -> Self:
-        """Train the ensemble and compute out-of-bag scores for the unlabeled set."""
+    def fit(
+        self,
+        features: np.ndarray,
+        selection: np.ndarray,
+        *,
+        sample_weight: np.ndarray | None = None,
+    ) -> Self:
+        """Train the ensemble and compute out-of-bag scores for the unlabeled set.
+
+        Args:
+            features: ``(n_samples, n_features)`` feature matrix.
+            selection: ``(n_samples,)`` PU indicator (``1`` = positive, ``0`` = unlabeled).
+            sample_weight: Optional ``(n_samples,)`` per-row weights (e.g. covariate-shift
+                importance weights on the positives). Each weak learner receives the weights
+                of the rows in its bag; ``None`` means uniform.
+
+        Returns:
+            ``self``.
+        """
         rng = np.random.default_rng(self.random_state)
-        positives = features[selection == 1]
-        unlabeled = features[selection == 0]
+        pos_mask = selection == 1
+        unl_mask = selection == 0
+        positives = features[pos_mask]
+        unlabeled = features[unl_mask]
         if len(positives) == 0 or len(unlabeled) == 0:
             raise ValueError("BaggingPULearner needs both positive and unlabeled samples.")
+        if sample_weight is not None:
+            positive_weights = np.asarray(sample_weight, dtype=np.float64)[pos_mask]
+            unlabeled_weights = np.asarray(sample_weight, dtype=np.float64)[unl_mask]
+        else:
+            positive_weights = np.ones(len(positives))
+            unlabeled_weights = np.ones(len(unlabeled))
 
         subsample_size = min(len(unlabeled), max(1, round(self.subsample_ratio * len(positives))))
         positive_labels = np.ones(len(positives))
@@ -77,7 +102,8 @@ class BaggingPULearner(PULearner):
             model = self._model_factory()
             train_features = np.vstack([positives, unlabeled[bag]])
             train_labels = np.concatenate([positive_labels, np.zeros(subsample_size)])
-            model.fit(train_features, train_labels)
+            train_weights = np.concatenate([positive_weights, unlabeled_weights[bag]])
+            model.fit(train_features, train_labels, sample_weight=train_weights)
             self._models.append(model)
 
             out_of_bag = ~in_bag

@@ -90,6 +90,11 @@ class FrozenEvalProtocol:
 
     # -- Public API ---------------------------------------------------------
 
+    @property
+    def jnj_pairs(self) -> frozenset[tuple[str, str]]:
+        """All JnJ ``(aryl_key, amine_key)`` InChIKey pairs (for exact-overlap leakage checks)."""
+        return self._jnj_pairs
+
     def labels(self, subset: Literal["val", "test"]) -> np.ndarray:
         """Return the binary feasibility labels for VAL or TEST."""
         index = self.val_index if subset == "val" else self.test_index

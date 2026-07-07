@@ -36,3 +36,6 @@ slurm/logs/*.err
 
 # Colleague's separate package (its own git repo)
 gpuma/
+
+# External upstream repos (their own git history, not tracked here)
+external/

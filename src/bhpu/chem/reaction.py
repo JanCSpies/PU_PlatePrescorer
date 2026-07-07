@@ -61,6 +61,40 @@ def build_cn_coupling_product(aryl_halide_smiles: str, amine_smiles: str) -> str
     return None
 
 
+@lru_cache(maxsize=200_000)
+def enumerate_cn_coupling_products(aryl_halide_smiles: str, amine_smiles: str) -> frozenset[str]:
+    """Enumerate *all* distinct BH C–N coupling products of an aryl halide and amine.
+
+    Unlike :func:`build_cn_coupling_product` (which returns one representative product),
+    this returns every sanitisable product across all halide positions and N–H sites. It
+    is used by the reaction miner to *confirm* that a candidate (aryl halide, amine) pair
+    truly produced one of a literature reaction's recorded products — a high-precision
+    detector of aryl C–N bond formation.
+
+    Args:
+        aryl_halide_smiles: SMILES of the aryl (pseudo)halide electrophile.
+        amine_smiles: SMILES of the amine nucleophile.
+
+    Returns:
+        A frozenset of canonical product SMILES (empty if the template does not apply or
+        either input is unparsable).
+    """
+    aryl = Chem.MolFromSmiles(aryl_halide_smiles)
+    amine = Chem.MolFromSmiles(amine_smiles)
+    if aryl is None or amine is None:
+        return frozenset()
+    outcomes = _CN_COUPLING_RXN.RunReactants((aryl, amine))
+    products: set[str] = set()
+    for outcome in outcomes:
+        product = outcome[0]
+        try:
+            Chem.SanitizeMol(product)
+        except (Chem.AtomValenceException, Chem.KekulizeException, ValueError):
+            continue
+        products.add(Chem.MolToSmiles(product))
+    return frozenset(products)
+
+
 class ReactionAssembler:
     """Build reaction SMILES (``reactants>>product``) from component columns.
 

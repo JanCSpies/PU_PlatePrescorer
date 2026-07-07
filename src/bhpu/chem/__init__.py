@@ -6,12 +6,14 @@ from bhpu.chem.canonical import canonical_smiles, inchikey, strip_and_canonicali
 from bhpu.chem.reaction import (
     ReactionAssembler,
     build_cn_coupling_product,
+    enumerate_cn_coupling_products,
 )
 
 __all__ = [
     "ReactionAssembler",
     "build_cn_coupling_product",
     "canonical_smiles",
+    "enumerate_cn_coupling_products",
     "inchikey",
     "strip_and_canonicalise",
 ]
