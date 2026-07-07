@@ -28,11 +28,39 @@ from bhpu.adapt import CoralAligner, DomainDiscriminator
 from bhpu.data import schema
 from bhpu.eval.metrics import FeasibilityMetrics, feasibility_metrics
 from bhpu.eval.protocol import FrozenEvalProtocol
+from bhpu.features import ECFPFeaturizer
 from bhpu.models.boosting import CatBoostFeasibilityModel
+from bhpu.pu.adapted import DomainAdaptedPULearner
 from bhpu.pu.bagging import BaggingPULearner
+from bhpu.pu.spy import SpyPULearner
 
 #: A fitted scorer: features -> P(feasible).
 Scorer = Callable[[np.ndarray], np.ndarray]
+
+
+def load_corpus_features(path: Path, *, n_bits: int = 2048) -> np.ndarray:
+    """ECFP-featurise a mined substrate-pair corpus (``aryl_smiles``/``amine_smiles`` columns).
+
+    The mined corpus carries no reaction conditions, so it is featurised with substrate ECFP — the
+    common feature space shared by the cached literature/grid/JnJ ECFP matrices. Morgan hashing is
+    deterministic and dataset-independent, so these bits align with the cache.
+
+    Args:
+        path: Parquet with ``aryl_smiles`` and ``amine_smiles`` columns.
+        n_bits: Bits per substrate fingerprint (must match the cached ECFP width).
+
+    Returns:
+        An ``(n_pairs, 2 * n_bits)`` float32 feature matrix.
+    """
+    corpus = pd.read_parquet(path)
+    frame = pd.DataFrame(
+        {
+            schema.ARYL_SMILES: corpus["aryl_smiles"],
+            schema.AMINE_SMILES: corpus["amine_smiles"],
+        }
+    )
+    features: np.ndarray = ECFPFeaturizer(n_bits=n_bits).fit_transform(frame).astype(np.float32)
+    return features
 
 
 @dataclass
@@ -159,6 +187,14 @@ class TransferExperiment:
         learner.fit(features, selection, sample_weight=sample_weight)
         return learner.predict_proba
 
+    def _fit_spy(self, x_pos: np.ndarray) -> Scorer:
+        """Train a spy-PU learner (PAYN-parity baseline: reliable negatives under SCAR)."""
+        features = np.vstack([x_pos, self._x_grid])
+        selection = np.concatenate([np.ones(len(x_pos)), np.zeros(len(self._x_grid))])
+        learner = SpyPULearner(self._catboost, n_repeats=3, random_state=self.random_state)
+        learner.fit(features, selection)
+        return learner.predict_proba
+
     # -- Arm assembly -------------------------------------------------------
 
     def run(self, *, compute_test: bool = True) -> list[ArmResult]:
@@ -185,6 +221,7 @@ class TransferExperiment:
 
         # (name, family, fitted scorer, notes)
         arms: list[tuple[str, str, Scorer, dict[str, float]]] = [
+            ("pu_spy", "pu", self._fit_spy(self._x_pos), {}),  # PAYN-parity baseline (SCAR)
             ("pu_naive", "pu", self._fit_pu(self._x_pos, None), {}),
             ("pu_coral", "pu", self._fit_pu(x_pos_coral, None), {}),
             ("pu_iw", "pu", self._fit_pu(self._x_pos, pos_weights), {"ess": ess_pos}),
@@ -208,6 +245,55 @@ class TransferExperiment:
                 result.test = feasibility_metrics(self._y_test, scorer(self._x_test))
             results.append(result)
         return results
+
+    def fit_adapted(
+        self, *, use_coral: bool = True, use_importance_weights: bool = True
+    ) -> DomainAdaptedPULearner:
+        """Fit the productised "better PAYN" (:class:`DomainAdaptedPULearner`) on the full corpus.
+
+        Uses the expanded positive set (literature [+ mined]) as P, the JnJ grid as transductive U,
+        and the source marginal for CORAL / the importance-weight discriminator.
+
+        Args:
+            use_coral: Enable CORAL feature alignment.
+            use_importance_weights: Enable covariate-shift importance weighting.
+
+        Returns:
+            The fitted learner (score target-domain features with ``predict_proba``).
+        """
+        features = np.vstack([self._x_pos, self._x_grid])
+        selection = np.concatenate([np.ones(len(self._x_pos)), np.zeros(len(self._x_grid))])
+        learner = DomainAdaptedPULearner(
+            self._catboost,
+            use_coral=use_coral,
+            use_importance_weights=use_importance_weights,
+            n_estimators=self.n_estimators,
+            random_state=self.random_state,
+        )
+        learner.fit(features, selection, source_marginal=self._x_source)
+        return learner
+
+    def evaluate(self, scorer: Scorer) -> dict[str, FeasibilityMetrics]:
+        """Score a fitted scorer on VAL and TEST (TEST is the single final touch)."""
+        return {
+            "val": feasibility_metrics(self._y_val, scorer(self._x_val)),
+            "test": feasibility_metrics(self._y_test, scorer(self._x_test)),
+        }
+
+    @property
+    def grid_features(self) -> np.ndarray:
+        """The transductive unlabeled-grid feature matrix (for plate-design scoring)."""
+        return self._x_grid
+
+    @property
+    def test_features(self) -> np.ndarray:
+        """JnJ TEST feature matrix (touch once, for the final report)."""
+        return np.asarray(self._x_test)
+
+    @property
+    def test_labels(self) -> np.ndarray:
+        """JnJ TEST binary feasibility labels."""
+        return self._y_test
 
     def summary(self) -> dict[str, object]:
         """Return split + diagnostic provenance for logging."""

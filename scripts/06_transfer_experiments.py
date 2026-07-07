@@ -14,32 +14,10 @@ import argparse
 import json
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-
-from bhpu.data import schema
-from bhpu.eval.transfer import ArmResult, TransferExperiment
-from bhpu.features import ECFPFeaturizer
+from bhpu.eval.transfer import ArmResult, TransferExperiment, load_corpus_features
 
 FEATURES_DIR = Path("datasets/processed/features")
 ARTIFACTS_DIR = Path("artifacts")
-
-
-def _featurize_corpus(path: Path, n_bits: int = 2048) -> np.ndarray:
-    """ECFP-featurise a mined substrate-pair corpus (columns ``aryl_smiles``/``amine_smiles``).
-
-    The mined corpus has no reaction conditions, so it is featurised with substrate ECFP (the
-    common feature space shared by the cached literature/grid/JnJ ECFP matrices). Morgan hashing is
-    deterministic and dataset-independent, so these bits align with the cache.
-    """
-    corpus = pd.read_parquet(path)
-    frame = pd.DataFrame(
-        {
-            schema.ARYL_SMILES: corpus["aryl_smiles"],
-            schema.AMINE_SMILES: corpus["amine_smiles"],
-        }
-    )
-    return ECFPFeaturizer(n_bits=n_bits).fit_transform(frame)
 
 
 def _row(result: ArmResult) -> str:
@@ -73,7 +51,7 @@ def main() -> None:
     if args.extra_corpus:
         if args.featurizer != "ecfp2048":
             parser.error("--extra-corpus needs ecfp2048 (mined corpus lacks conditions).")
-        extra_features = _featurize_corpus(Path(args.extra_corpus))
+        extra_features = load_corpus_features(Path(args.extra_corpus))
         print(f"Loaded extra positive corpus {extra_features.shape} from {args.extra_corpus}")
 
     experiment = TransferExperiment(
