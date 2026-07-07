@@ -157,6 +157,13 @@ uv run pytest`.
 
 ## 7. Current status
 
-See the top of `LAB_JOURNAL.md` for the latest. High level: scaffolding + dataset split + a
-five-territory literature deep dive are the initial pass. Next up: JnJ test-set spec →
-combinatorial unlabeled-space generation → leakage audit → PU baselines.
+See the top of `LAB_JOURNAL.md` for the latest. Done: scaffolding, dataset split, literature deep
+dive, full pipeline (features/leakage/space/models/PU/eval), tests, and a **SLURM benchmark**.
+Headline result: **bagging PU ≫ spy** (ROC-AUC ~0.90 vs ~0.86, far more stable) on within-JnJ
+recovery; supervised OOD bar (40 Neves folds, DRFP2048) = 0.837. **Open challenge:** cross-domain
+literature→JnJ transfer is still ~random — the core research problem for the week. Next: PU with a
+combinatorial-grid U + propensity weighting; Optuna tuning; TabPFN/ChemProp arms on the GPU partition;
+plate-design demo by scoring the unlabeled grid with the winning bagging model.
+
+**SLURM:** compute is offloaded to the cluster at `--nice=1000000` (colleagues preempt us). See
+`docs/slurm.md`. Cached features live in `datasets/processed/features/`.

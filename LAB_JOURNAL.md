@@ -18,6 +18,45 @@
 
 ---
 
+## 2026-07-07 (night) — SLURM online + first benchmark: bagging PU wins decisively — Florian's session (claude)
+
+**SLURM setup (see `docs/slurm.md`):** cluster mapped (CPU 14d / CPU_Express 24h / CPU_Long / GPU
+2×A6000+8×A40; idle 384-thread/1TB nodes). All our jobs use **`--nice=1000000`** (priority ~1) so
+colleagues preempt us. Verified the uv `.venv` runs on compute nodes; use `forkserver` for MP.
+
+**Job 1 — parallel feature cache** (`scripts/03`, `slurm/featurize.sbatch`, 64 cores): cached DRFP+ECFP
+(2048) for JnJ / clean-literature / unlabeled-grid → `datasets/processed/features/`. **DRFP JnJ 303s→7.2s
+(42× speedup)**; whole job 41s.
+
+**Job 2 — benchmark array** (`scripts/04`, `slurm/benchmark.sbatch`, 20 configs, 8 cores each, all
+COMPLETED). Within-JnJ PU = reveal ½ true positives as P, recover the rest from U. Results
+(`artifacts/benchmark_summary.json`):
+
+| task | feat | strategy | ROC-AUC | AUPRC | uplift@96 |
+|---|---|---|---|---|---|
+| supervised OOD (40 folds) | drfp2048 | – | **0.837 ± 0.105** | 0.744 | – |
+| supervised OOD (40 folds) | ecfp2048 | – | 0.846 | 0.741 | – |
+| PU | drfp2048 | spy | 0.855–0.863 | 0.62–0.67 | ~3.0× |
+| PU | drfp2048 | **bagging** | **0.897–0.900** | **0.82–0.83** | **~4.1×** |
+| PU | ecfp2048 | spy | 0.80–0.835 | 0.46–0.58 (high var) | 1.8–4.1× |
+| PU | ecfp2048 | bagging | 0.889–0.895 | 0.81–0.82 | ~4.0× |
+
+**Findings:**
+1. **Bagging PU ≫ spy** on every metric, and dramatically **more stable across seeds** (spy variance is
+   large, worst on ECFP). Confirms the "many weak predictors" thesis (phenol paper / Mordelet–Vert) — make
+   bagging the default PU arm.
+2. **Subsample ratio k=1 ≈ k=2** (0.898 vs 0.900) → use k=1 (cheaper).
+3. **DRFP ≥ ECFP** for PU (esp. spy); features roughly tied for the supervised bar.
+4. Supervised OOD DRFP2048 across 40 folds = **0.837 ROC-AUC** — a credible Neves-level in-domain bar
+   (vs the misleading 0.699 single-fold/1024-bit smoke number).
+
+**Next:** (a) the real cross-domain problem (literature→JnJ, still the open challenge — Exp C was ~random);
+try PU with **combinatorial-grid U** + propensity/importance weighting. (b) Optuna-tune CatBoost + bagging
+(GPU partition for TabPFN/ChemProp arms). (c) precision@high-conf calibration (guard the empty-slice
+warning in metrics). (d) apply the winning bagging model to score the unlabeled grid → plate design demo.
+
+---
+
 ## 2026-07-07 (evening) — First end-to-end run: PU works within-domain, naive transfer fails — Florian's session (claude)
 
 **Setup:** `scripts/02_run_pu_baseline.py`. DRFP (1024 bits, reagent-inclusive), CatBoost (250 iters,
