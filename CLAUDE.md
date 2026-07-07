@@ -125,20 +125,33 @@ PyMuPDF (`import fitz`); use it read-only for reading PDFs (don't add it to the 
 ```
 CLAUDE.md            # this file (shared charter)
 LAB_JOURNAL.md       # append-only experiment log (humans + agents)
-pyproject.toml       # uv project + tooling config
+pyproject.toml       # uv project + tooling config (ruff google-docstrings, mypy strict)
 src/bhpu/            # installable, typed, OOP package
-  data/              #   dataset loading / splitting / (later) leakage audit
-scripts/             # thin reproducible CLI entrypoints (NN_*.py)
-datasets/raw/        # immutable source data
+  data/              #   schema constants + RawDatasetSplitter
+  chem/              #   RDKit canonicalisation + BH product generation
+  features/          #   ECFP / DRFP / condition one-hot / composite featurisers
+  leakage/           #   LeakageAuditor (substrate/pair overlap vs test)
+  space/             #   CombinatorialSpaceGenerator (unlabeled grid)
+  models/            #   FeasibilityModel: CatBoost (core), TabPFN/ChemProp (extras)
+  pu/                #   PU learners: SpyPULearner, BaggingPULearner
+  eval/              #   NevesFoldReader, feasibility_metrics, plate hit-rate uplift
+scripts/             # thin CLI entrypoints: 01_split_raw_dataset, 02_run_pu_baseline
+tests/               # pytest suite (synthetic data; fast)
+datasets/raw/        # immutable source data (Neves/, Cernak/, ORD/, Pistachio/)
 datasets/processed/  # regenerated splits + provenance
+artifacts/           # experiment outputs (gitignored)
 docs/
   datasets.md        # data provenance & caveats
   decisions/         # one file per decision (ADR-style)
-  literature/notes/  # one note per paper
+  literature/notes/  # one note per paper (23 notes)
   literature/SYNTHESIS.md  # merged literature synthesis
 literature/          # source PDFs (+ topical subfolders)
 LITERATURE_REVIEW.md # earlier broad review (pre-project-sharpening; superseded by docs/literature/)
 ```
+
+**Model extras:** `uv sync --extra models` installs TabPFN + ChemProp (Torch-backed);
+core CPU pipeline runs without them. Quality gates: `uv run ruff check . && uv run mypy src scripts &&
+uv run pytest`.
 
 ---
 

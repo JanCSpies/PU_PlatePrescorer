@@ -20,7 +20,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from bhpu.data import RawDatasetSplitter
+from bhpu.data import RawDatasetSplitter, SplitReport
 
 # Resolve paths relative to the repository root (this file lives in scripts/).
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
@@ -52,7 +52,7 @@ def main() -> None:
     console.print(f"  {'report':11s} -> {REPORT_PATH.relative_to(REPO_ROOT)}")
 
 
-def _print_summary(console: Console, report) -> None:  # noqa: ANN001 (rich table view)
+def _print_summary(console: Console, report: SplitReport) -> None:
     table = Table(title="BH-HTE split summary")
     table.add_column("partition", style="cyan")
     table.add_column("rows", justify="right")

@@ -35,6 +35,12 @@ dev = [
     "pytest>=8.3",           # Unit tests
     "ipykernel>=6.29",       # Notebook kernel for exploratory analysis
 ]
+# Heavy, torch-backed learners kept optional so the core pipeline stays light.
+# Install with:  uv sync --extra models
+models = [
+    "tabpfn>=2.0",           # Pretrained tabular foundation model (limited-label regime)
+    "chemprop>=2.1",         # Directed-MPNN graph model over reaction/molecule SMILES
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -90,14 +96,23 @@ plugins = []
 [[tool.mypy.overrides]]
 module = [
     "pandas.*",
-    "rdkit.*",
     "catboost.*",
     "drfp.*",
     "sklearn.*",
     "optuna.*",
     "matplotlib.*",
     "seaborn.*",
+    "tabpfn.*",
+    "chemprop.*",
 ]
+ignore_missing_imports = true
+
+# rdkit ships stubs (rdkit-stubs) but the 2026.03 build has a syntax error in
+# rdchem.pyi; skip following its imports so mypy does not choke on the vendored stub.
+[[tool.mypy.overrides]]
+module = ["rdkit.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

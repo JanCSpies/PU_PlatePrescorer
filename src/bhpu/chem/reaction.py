@@ -1,0 +1,124 @@
+"""Assemble reaction SMILES and generate Buchwald–Hartwig C–N coupling products.
+
+Two needs:
+
+* **DRFP featurisation** wants a reaction SMILES ``reactants>>product``. The
+  :class:`ReactionAssembler` builds one from the component columns, optionally
+  including the reagents (catalyst/base/solvent) so the fingerprint captures the
+  *conditions* as well as the substrates.
+* The **enumerated unlabeled space** has no measured product column, so
+  :func:`build_cn_coupling_product` synthesises the expected C–N coupling product
+  from an aryl halide and an amine via an RDKit reaction template.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from functools import lru_cache
+
+import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import AllChem
+
+from bhpu.data import schema
+
+# Buchwald–Hartwig C–N coupling template: aryl–halide + amine N–H -> aryl–N.
+# The amine nitrogen must bear at least one H (primary or secondary amine); tertiary
+# amines and imine/nitrile nitrogens are excluded so they correctly yield no product.
+_CN_COUPLING_SMARTS: str = "[c:1][F,Cl,Br,I].[N;H1,H2;!$(N=*);!$(N#*);!$(N-[#7,#8]):2]>>[c:1][N:2]"
+_CN_COUPLING_RXN = AllChem.ReactionFromSmarts(_CN_COUPLING_SMARTS)
+
+
+@lru_cache(maxsize=200_000)
+def build_cn_coupling_product(aryl_halide_smiles: str, amine_smiles: str) -> str | None:
+    """Generate the expected BH C–N coupling product SMILES.
+
+    Applies an aryl-halide + amine → aryl-amine template. When several products are
+    possible (multiple halides or N–H sites) the first RDKit-enumerated product is
+    returned — sufficient as a representative structure for reaction fingerprinting.
+
+    Args:
+        aryl_halide_smiles: SMILES of the aryl (pseudo)halide electrophile.
+        amine_smiles: SMILES of the amine nucleophile.
+
+    Returns:
+        Canonical product SMILES, or ``None`` if the template does not apply
+        (e.g. a tertiary amine) or either input is unparsable.
+    """
+    aryl = Chem.MolFromSmiles(aryl_halide_smiles)
+    amine = Chem.MolFromSmiles(amine_smiles)
+    if aryl is None or amine is None:
+        return None
+    products = _CN_COUPLING_RXN.RunReactants((aryl, amine))
+    for outcome in products:
+        product = outcome[0]
+        try:
+            Chem.SanitizeMol(product)
+        except (Chem.AtomValenceException, Chem.KekulizeException, ValueError):
+            continue
+        product_smiles: str = Chem.MolToSmiles(product)
+        return product_smiles
+    return None
+
+
+class ReactionAssembler:
+    """Build reaction SMILES (``reactants>>product``) from component columns.
+
+    Attributes:
+        include_reagents: If ``True``, append catalyst/base/solvent to the reactant
+            side so a downstream reaction fingerprint encodes the conditions too.
+    """
+
+    def __init__(self, *, include_reagents: bool = True) -> None:
+        """Initialise the assembler.
+
+        Args:
+            include_reagents: Whether to include catalyst/base/solvent SMILES on the
+                reactant side of the assembled reaction.
+        """
+        self.include_reagents = include_reagents
+
+    def _reactant_columns(self) -> tuple[str, ...]:
+        """Return the component columns used on the reactant side."""
+        if self.include_reagents:
+            return (schema.ARYL_SMILES, schema.AMINE_SMILES, *schema.CONDITION_SMILES_COLUMNS)
+        return (schema.ARYL_SMILES, schema.AMINE_SMILES)
+
+    def assemble_row(self, row: pd.Series) -> str | None:
+        """Assemble a single reaction SMILES from a DataFrame row.
+
+        Args:
+            row: A row exposing the component SMILES columns and ``Product SMILES``.
+
+        Returns:
+            ``"reactant1.reactant2...>>product"``, or ``None`` if the product or any
+            required reactant is missing/empty.
+        """
+        reactants = self._collect(row, self._reactant_columns())
+        product = row.get(schema.PRODUCT_SMILES)
+        if reactants is None or not isinstance(product, str) or not product:
+            return None
+        return f"{'.'.join(reactants)}>>{product}"
+
+    def assemble(self, frame: pd.DataFrame) -> list[str | None]:
+        """Assemble reaction SMILES for every row of ``frame``.
+
+        Args:
+            frame: DataFrame with the component and product SMILES columns.
+
+        Returns:
+            A list of reaction SMILES (or ``None`` per row where assembly fails),
+            aligned to ``frame``'s row order.
+        """
+        return [self.assemble_row(row) for _, row in frame.iterrows()]
+
+    @staticmethod
+    def _collect(row: pd.Series, columns: Sequence[str]) -> list[str] | None:
+        """Collect non-empty component SMILES for ``columns``; ``None`` if any missing."""
+        values: list[str] = []
+        for column in columns:
+            value = row.get(column)
+            if not isinstance(value, str) or not value:
+                return None
+            values.append(value)
+        return values
