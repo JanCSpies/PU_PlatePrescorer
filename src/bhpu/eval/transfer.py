@@ -69,6 +69,8 @@ class TransferExperiment:
         featurizer: str = "drfp2048",
         n_estimators: int = 60,
         random_state: int = 0,
+        extra_positive_features: np.ndarray | None = None,
+        extra_positive_label: str = "ORD",
     ) -> None:
         """Load cached features and build the frozen split.
 
@@ -78,11 +80,17 @@ class TransferExperiment:
             featurizer: Feature key to load (``"drfp2048"`` or ``"ecfp2048"``).
             n_estimators: Bags per PU ensemble (kept modest for the sweep).
             random_state: Global seed.
+            extra_positive_features: Optional ``(m, d)`` matrix of *additional* positive-only
+                reactions (e.g. the mined ORD corpus), already featurised with ``featurizer`` and
+                leakage-audited against JnJ. Enters the PU positive set and the source marginal; the
+                supervised arms stay literature-only (they need measured negatives).
+            extra_positive_label: Provenance tag for the extra corpus (for logging).
         """
         self._dir = features_dir
         self._featurizer = featurizer
         self.n_estimators = n_estimators
         self.random_state = random_state
+        self._extra_label = extra_positive_label
 
         self._lit_frame = pd.read_parquet(features_dir / "literature_clean.parquet")
         self._jnj_frame = pd.read_parquet(features_dir / "test_jnj.parquet")
@@ -94,18 +102,28 @@ class TransferExperiment:
         self.protocol.assert_training_clean(self._lit_frame)
 
         self._pos_mask = self._lit_frame[schema.LABEL].to_numpy() == 1
-        self._x_pos = self._x_lit[self._pos_mask]
+        self._x_pos_lit = self._x_lit[self._pos_mask]
         self._y_lit = self._lit_frame[schema.LABEL].to_numpy().astype(int)
+
+        # Expanded positive set (literature positives + optional mined corpus) and the source
+        # marginal used for CORAL / the discriminator (literature + extra, spanning both classes).
+        self._extra_pos = extra_positive_features
+        if extra_positive_features is not None:
+            self._x_pos = np.vstack([self._x_pos_lit, extra_positive_features]).astype(np.float32)
+            self._x_source = np.vstack([self._x_lit, extra_positive_features]).astype(np.float32)
+        else:
+            self._x_pos = self._x_pos_lit
+            self._x_source = self._x_lit
 
         self._val_idx = self.protocol.val_index
         self._test_idx = self.protocol.test_index
         self._x_val, self._y_val = self._x_jnj[self._val_idx], self.protocol.labels("val")
         self._x_test, self._y_test = self._x_jnj[self._test_idx], self.protocol.labels("test")
 
-        # One covariate-shift discriminator (literature marginal vs JnJ-grid marginal) reused by
-        # every importance-weighted arm; its AUC is the headline domain-shortcut diagnostic.
+        # One covariate-shift discriminator (source marginal vs JnJ-grid marginal) reused by every
+        # importance-weighted arm; its AUC is the headline domain-shortcut diagnostic.
         self._discriminator = DomainDiscriminator(random_state=random_state).fit(
-            self._x_lit, self._x_grid
+            self._x_source, self._x_grid
         )
         self.domain_auc: float = self._discriminator.domain_auc_
 
@@ -143,10 +161,6 @@ class TransferExperiment:
 
     # -- Arm assembly -------------------------------------------------------
 
-    def _coral_source(self, source: np.ndarray) -> np.ndarray:
-        """Align a literature source matrix to the JnJ-grid distribution via CORAL."""
-        return CoralAligner().fit(source, self._x_grid).transform(source)
-
     def run(self, *, compute_test: bool = True) -> list[ArmResult]:
         """Fit and evaluate every arm; return results (VAL always, TEST if requested).
 
@@ -161,8 +175,13 @@ class TransferExperiment:
         ess_pos = DomainDiscriminator.effective_sample_size(pos_weights)
         ess_lit = DomainDiscriminator.effective_sample_size(lit_weights)
 
-        x_pos_coral = self._coral_source(self._x_pos)
-        x_lit_coral = self._coral_source(self._x_lit)
+        # One domain map, fit on the source marginal (literature [+ mined], spans both classes like
+        # the grid), then applied to the positives and the literature set. Fitting CORAL on the
+        # positives *alone* would inflate their covariance to the grid's bimodal spread and smear
+        # the feasibility signal — so the map must come from the marginal.
+        aligner = CoralAligner().fit(self._x_source, self._x_grid)
+        x_pos_coral = aligner.transform(self._x_pos)
+        x_lit_coral = aligner.transform(self._x_lit)
 
         # (name, family, fitted scorer, notes)
         arms: list[tuple[str, str, Scorer, dict[str, float]]] = [
@@ -195,9 +214,12 @@ class TransferExperiment:
         return {
             "featurizer": self._featurizer,
             "n_estimators": self.n_estimators,
-            "domain_auc_lit_vs_grid": self.domain_auc,
-            "n_positives": int(self._pos_mask.sum()),
-            "n_literature": len(self._x_lit),
+            "domain_auc_source_vs_grid": self.domain_auc,
+            "n_positives_total": len(self._x_pos),
+            "n_positives_literature": int(self._pos_mask.sum()),
+            "n_positives_extra": 0 if self._extra_pos is None else len(self._extra_pos),
+            "extra_corpus": None if self._extra_pos is None else self._extra_label,
+            "n_literature_marginal": len(self._x_source),
             "n_grid_unlabeled": len(self._x_grid),
             **self.protocol.summary(),
         }

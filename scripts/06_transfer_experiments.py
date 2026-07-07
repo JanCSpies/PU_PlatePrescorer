@@ -14,10 +14,32 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+
+from bhpu.data import schema
 from bhpu.eval.transfer import ArmResult, TransferExperiment
+from bhpu.features import ECFPFeaturizer
 
 FEATURES_DIR = Path("datasets/processed/features")
 ARTIFACTS_DIR = Path("artifacts")
+
+
+def _featurize_corpus(path: Path, n_bits: int = 2048) -> np.ndarray:
+    """ECFP-featurise a mined substrate-pair corpus (columns ``aryl_smiles``/``amine_smiles``).
+
+    The mined corpus has no reaction conditions, so it is featurised with substrate ECFP (the
+    common feature space shared by the cached literature/grid/JnJ ECFP matrices). Morgan hashing is
+    deterministic and dataset-independent, so these bits align with the cache.
+    """
+    corpus = pd.read_parquet(path)
+    frame = pd.DataFrame(
+        {
+            schema.ARYL_SMILES: corpus["aryl_smiles"],
+            schema.AMINE_SMILES: corpus["amine_smiles"],
+        }
+    )
+    return ECFPFeaturizer(n_bits=n_bits).fit_transform(frame)
 
 
 def _row(result: ArmResult) -> str:
@@ -39,18 +61,32 @@ def main() -> None:
     parser.add_argument("--featurizer", default="drfp2048", choices=["drfp2048", "ecfp2048"])
     parser.add_argument("--n-estimators", type=int, default=60)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--extra-corpus",
+        default=None,
+        help="Parquet of mined positive substrate pairs to add (requires --featurizer ecfp2048).",
+    )
+    parser.add_argument("--tag", default="", help="Suffix for the artifacts filename.")
     args = parser.parse_args()
+
+    extra_features = None
+    if args.extra_corpus:
+        if args.featurizer != "ecfp2048":
+            parser.error("--extra-corpus needs ecfp2048 (mined corpus lacks conditions).")
+        extra_features = _featurize_corpus(Path(args.extra_corpus))
+        print(f"Loaded extra positive corpus {extra_features.shape} from {args.extra_corpus}")
 
     experiment = TransferExperiment(
         FEATURES_DIR,
         featurizer=args.featurizer,
         n_estimators=args.n_estimators,
         random_state=args.seed,
+        extra_positive_features=extra_features,
     )
     summary = experiment.summary()
     print("=== Transfer experiment ===")
     print(json.dumps(summary, indent=2))
-    print(f"\nDomain shortcut diagnostic (lit-vs-JnJ-grid AUC): {experiment.domain_auc:.3f}")
+    print(f"\nDomain shortcut diagnostic (source-vs-JnJ-grid AUC): {experiment.domain_auc:.3f}")
     print("  (≈1.0 → literature and JnJ are trivially separable; the 0.52 baseline explained.)\n")
 
     results = experiment.run(compute_test=True)
@@ -80,7 +116,8 @@ def main() -> None:
             for r in results
         ],
     }
-    out = ARTIFACTS_DIR / f"transfer_{args.featurizer}.json"
+    suffix = f"_{args.tag}" if args.tag else ""
+    out = ARTIFACTS_DIR / f"transfer_{args.featurizer}{suffix}.json"
     out.write_text(json.dumps(payload, indent=2))
     print(f"\nWrote {out}")
 

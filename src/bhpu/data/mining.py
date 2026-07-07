@@ -80,6 +80,27 @@ class MinedReaction:
     has_pd: bool
 
 
+def _clean_smiles(smiles: str) -> str | None:
+    """Canonicalise a SMILES and strip atom-map numbers (some ORD reactants are mapped).
+
+    Atom maps survive :func:`canonical_smiles` and would pollute the stored corpus and its
+    fingerprints. InChIKey-based dedup already ignores them, but the persisted SMILES must be clean.
+
+    Args:
+        smiles: Raw SMILES (possibly atom-mapped).
+
+    Returns:
+        Canonical, unmapped SMILES, or ``None`` if unparsable.
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(0)
+    cleaned: str = Chem.MolToSmiles(mol)
+    return cleaned
+
+
 class BHCouplingDetector:
     """Detect and extract aryl C–N couplings from a bag of molecules + products."""
 
@@ -110,13 +131,13 @@ class BHCouplingDetector:
         has_pd = any(s.count("Pd") > 0 or "[Pd" in s for s in reaction.molecules)
 
         for aryl_raw in aryl_halides:
-            aryl = canonical_smiles(aryl_raw)
+            aryl = _clean_smiles(aryl_raw)
             if aryl is None:
                 continue
             for amine_raw in amines:
                 if amine_raw == aryl_raw:
                     continue  # require an intermolecular coupling
-                amine = canonical_smiles(amine_raw)
+                amine = _clean_smiles(amine_raw)
                 if amine is None:
                     continue
                 for product in enumerate_cn_coupling_products(aryl, amine):

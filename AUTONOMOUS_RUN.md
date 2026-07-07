@@ -70,11 +70,21 @@ Predict **feasibility of Buchwald–Hartwig C–N couplings on the JnJ (Neves) t
 
 ## Status checklist (update as you go)
 - [x] WS0 protocol frozen (`FrozenEvalProtocol`; val 2624 / test 1920, both-axis substrate-disjoint;
-      leakage guard tested). TODO: re-run baselines under it for honest starting numbers.
-- [ ] WS1 ORD C–N mining; Cernak adapter; unified positive corpus + leakage audit; source benchmark
-      — CONFIRMED minable: ORDerly ~10.6% C–N (~153k), ord.csv ~22.9%; detector = aryl-halide + N–H
-      amine → product. literature_hte (4,464 pos) is the clean in-domain seed; ORD adds substrate diversity.
-- [ ] WS2 SAR/propensity + grid-U PU; transfer improved over 0.52
-- [ ] WS3 PU-theory notes; PAYN cloned + run as baseline
-- [ ] WS4 xtb features on SLURM; UMA via gpuma (stretch); QM-vs-fingerprint verdict
-- [ ] Final: best honest literature→JnJ TEST metrics + plate-uplift demo; LAB_JOURNAL written up
+      leakage guard tested).
+- [x] WS1 ORD C–N mining DONE: `src/bhpu/data/mining.py` + `scripts/07` + `slurm/mine_cn.sbatch`.
+      Mined 3.80M reactions → 124,518 confirmed couplings → **35,929 unique pairs**
+      (`datasets/processed/cn_corpus_ord.parquet`). **Leakage: exact_jnj_pair_hits=0** (ORD does NOT
+      contain the test set); 2,221 JnJ-substrate pairs dropped. Cernak adapter + Pistachio still TODO
+      (optional; Pistachio license-flagged). Source benchmark = the ECFP lit+ORD arm (SLURM 55114).
+- [x] WS2 domain-adaptation core DONE: `src/bhpu/adapt/` (DomainDiscriminator, CoralAligner) +
+      `DomainAdaptedPULearner`. Transfer harness `eval/transfer.py`. **Numbers pending** (SLURM 55114).
+- [x] WS3 PU-theory note + PAYN cloned & RUNNING (`external/PAYN`, note `payn-baseline.md`).
+      TODO: run PAYN on our literature→JnJ split as an explicit baseline row (needs ~60-line driver).
+- [ ] WS4 xtb features on SLURM; UMA via gpuma (stretch); QM-vs-fingerprint verdict.
+- [ ] Final: read 55114 → select arm on VAL → single TEST report + plate-uplift demo.
+
+## Key results so far (2026-07-08)
+- Mined C–N positive corpus: **35,929 unique substrate pairs** from ORD, JnJ-leak-free (0 exact
+  test pairs). Expands positives ~9× (4.1k literature → ~40k) with large substrate diversity.
+- Diagnosis: 0.52 is a **domain shortcut**, not prior shift → fix via transductive-U + CORAL + IW.
+- Running (SLURM 55114): DRFP/ECFP × {lit-only, lit+ORD} × {naive, CORAL, IW} × {PU, supervised}.

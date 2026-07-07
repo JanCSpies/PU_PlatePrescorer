@@ -18,6 +18,50 @@
 
 ---
 
+## 2026-07-08 — WS1 mining done + WS2/WS3 domain-adaptation core + "better PAYN" — Florian's session (claude)
+
+**Context:** the research sub-agent's diagnosis reframed the whole problem (note
+`docs/literature/notes/theory-crossdomain-pu.md`, ADR `docs/decisions/003-...`): the ≈0.52
+literature→JnJ ROC-AUC is **not** class-prior shift (ROC-AUC is invariant to that) — it is a
+**domain shortcut** (a P-vs-U classifier learns "was this reaction *reported*?" not "does it
+work?"). Fix = transductive U (the JnJ grid we already have) + kill the shortcut (CORAL feature
+alignment, covariate-shift importance weights, prior calibration). This *is* the "better PAYN"
+Florian asked for (PAYN = spy-PU under SCAR, predicts yield, single-dataset CV — confirmed cloned &
+running in `external/PAYN`, note `payn-baseline.md`; its in-domain SCAR framing is the baseline to beat).
+
+**What I did:**
+- **WS1 — C–N miner** (`src/bhpu/data/mining.py`, `scripts/07`, SLURM `slurm/mine_cn.sbatch`).
+  High-precision detector: a reaction counts only if some (aryl-halide, N–H amine) pair's enumerated
+  BH product matches one of the reaction's *recorded* products. Mined **ord.csv + ORDerly** on
+  CPU_Express (60 workers): **scanned 3.80M reactions in 132 s (~29k/s)** → **124,518 confirmed C–N
+  couplings** → **35,929 unique substrate pairs** after cross-source dedup. Fixed an atom-map leak in
+  stored SMILES (some ORD reactants are mapped) → re-mined clean (0 mapped rows).
+- **LEAKAGE / the user's explicit worry ("is the test set inside ORD/Pistachio?"):**
+  **`n_exact_jnj_pair_hits = 0`** — ORD does **not** contain the JnJ (aryl,amine) test pairs.
+  **2,221** mined pairs reused a JnJ *substrate* (common building blocks) → **dropped** to keep the
+  frozen protocol's substrate-disjointness. Provenance: `datasets/processed/cn_corpus_ord_provenance.json`.
+  (Pistachio deferred — license-flagged; ORD is the open primary. Only 2,724/35,929 have detectable
+  Pd → most ORD C–N is SNAr/Cu; `has_pd` flag kept for a BH-only ablation.)
+- **WS2/WS3 — domain-adaptation package** (`src/bhpu/adapt/`): `DomainDiscriminator`
+  (cross-fitted source-vs-target AUC = the shortcut diagnostic + covariate-shift weights
+  `w=d/(1−d)`, Kish ESS guard), `CoralAligner` (closed-form whiten→recolour). Productised
+  **`DomainAdaptedPULearner`** ("better PAYN": transductive U + CORAL + importance-weighted PU-bagging).
+- **Honest transfer harness** (`src/bhpu/eval/transfer.py`, `scripts/06`): 7 arms
+  (naive/CORAL/IW × PU/supervised) under the frozen protocol; extended to fold in the mined ORD
+  corpus (ECFP substrate space) for a data-expansion benchmark. Running on SLURM (job 55114):
+  DRFP lit-only, ECFP lit-only, ECFP lit+ORD.
+- **Bug the unit tests caught:** CORAL fit on positives *alone* inflates their covariance to the
+  grid's bimodal spread and **destroys** the feasibility signal (synthetic AUC 0.46). Fix: fit the
+  domain map on the *source marginal* (all literature, spans both classes), apply to positives.
+  New test `test_domain_adaptation_beats_naive_under_shift` now demonstrates the full thesis
+  (naive sinks under a domain shift; adaptation recovers). 20 tests green; ruff+mypy clean.
+
+**Result (data so far):** positive corpus expanded ~9× (4.1k literature → ~40k with ORD), huge
+substrate diversity, provably JnJ-leak-free. Transfer numbers pending (SLURM 55114).
+
+**Next:** read 55114 results → pick the winning arm on VAL → single TEST report + plate-uplift demo;
+then WS4 (xtb/UMA features) if the fingerprint verdict warrants it. **TEST touched once, at the end.**
+
 ## 2026-07-08 — Autonomous run START: frozen protocol + WS1 data recon — Florian's session (claude)
 
 **Decisions locked (Florian, before an 8h autonomous run):** objective = predict JnJ BH C–N
