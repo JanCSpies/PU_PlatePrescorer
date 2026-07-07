@@ -18,6 +18,38 @@
 
 ---
 
+## 2026-07-07 (evening) — First end-to-end run: PU works within-domain, naive transfer fails — Florian's session (claude)
+
+**Setup:** `scripts/02_run_pu_baseline.py`. DRFP (1024 bits, reagent-inclusive), CatBoost (250 iters,
+depth 6, auto_class_weights=Balanced). Leakage: substrate-level filter removed 1,384 literature rows
+(19 shared aryls, 1 amine via canonical InChIKey) → 10,473 clean. Artifacts:
+`artifacts/pu_baseline_metrics.json`.
+
+**Results:**
+| Exp | Setup | Headline |
+|---|---|---|
+| A | Supervised CatBoost on 1 Neves OOD fold of JnJ | ROC-AUC 0.699, AUPRC 0.357, BalAcc 0.531, prec@0.85 = n/a (0 preds > 0.85 → underconfident) |
+| B | **PU within JnJ** (reveal ½ positives, recover rest) | **Spy 0.874 / AUPRC 0.719; Bagging 0.899 / AUPRC 0.826** (base 0.243) |
+| C | **Literature → JnJ transfer** (supervised) | ROC-AUC **0.524** (≈random); plate uplift ~0.93–1.01× (no uplift) |
+
+**Interpretation (the important part):**
+1. **PU machinery works, and bagging > spy** (0.899 vs 0.874 ROC-AUC) — matches the phenol-PU-bagging
+   paper's finding. The within-domain PU experiment recovers hidden positives well. ✓ stack validated.
+2. **Naive literature→JnJ transfer is ≈random (0.524).** This is the anticipated **cross-domain problem**:
+   a model trained on literature-HTE *substrates* does not transfer to JnJ *substrates* with plain DRFP.
+   This is the central research challenge for the week, now empirically confirmed — not a bug.
+3. Exp A is well below the Neves >90%-precision bar: single fold, small DRFP (1024), no Optuna, and
+   `auto_class_weights=Balanced` flattens probabilities (frac>0.85 = 0). Needs tuning, not alarm.
+
+**Next / hypotheses to test:** (a) **domain adaptation** — use a shared *unlabeled* combinatorial grid as U
+so P(lit) and U(JnJ-domain) overlap; importance weighting / propensity (SAR-EM). (b) Bigger DRFP (2048)
++ ECFP + Optuna; drop class-weighting for the supervised bar; average all 40 Neves folds. (c) Try the
+PU *from literature positives + combinatorial-grid U* (the real design), predicting JnJ. (d) TabPFN /
+ChemProp arms. (e) **Perf:** DRFP featurisation is slow (JnJ 303s, lit 213s via per-row assemble) →
+cache features to disk + parallelise; this is why we move heavy runs to SLURM.
+
+---
+
 ## 2026-07-07 (later) — Deep-dive complete, split verified, data landscape mapped — Florian's session (claude)
 
 **What I did:**

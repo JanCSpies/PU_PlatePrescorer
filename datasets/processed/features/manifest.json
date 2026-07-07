@@ -1,0 +1,66 @@
+{
+  "workers": 64,
+  "bits": 2048,
+  "entries": [
+    {
+      "dataset": "test_jnj",
+      "featurizer": "drfp2048",
+      "shape": [
+        11328,
+        2048
+      ],
+      "seconds": 7.2,
+      "path": "datasets/processed/features/test_jnj__drfp2048.npz"
+    },
+    {
+      "dataset": "test_jnj",
+      "featurizer": "ecfp2048",
+      "shape": [
+        11328,
+        4096
+      ],
+      "seconds": 0.5,
+      "path": "datasets/processed/features/test_jnj__ecfp2048.npz"
+    },
+    {
+      "dataset": "literature_clean",
+      "featurizer": "drfp2048",
+      "shape": [
+        10473,
+        2048
+      ],
+      "seconds": 4.6,
+      "path": "datasets/processed/features/literature_clean__drfp2048.npz"
+    },
+    {
+      "dataset": "literature_clean",
+      "featurizer": "ecfp2048",
+      "shape": [
+        10473,
+        4096
+      ],
+      "seconds": 0.5,
+      "path": "datasets/processed/features/literature_clean__ecfp2048.npz"
+    },
+    {
+      "dataset": "unlabeled_grid",
+      "featurizer": "drfp2048",
+      "shape": [
+        26368,
+        2048
+      ],
+      "seconds": 12.7,
+      "path": "datasets/processed/features/unlabeled_grid__drfp2048.npz"
+    },
+    {
+      "dataset": "unlabeled_grid",
+      "featurizer": "ecfp2048",
+      "shape": [
+        26368,
+        4096
+      ],
+      "seconds": 0.9,
+      "path": "datasets/processed/features/unlabeled_grid__ecfp2048.npz"
+    }
+  ]
+}

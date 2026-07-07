@@ -29,3 +29,7 @@ mlruns/
 
 # --- OS ---
 .DS_Store
+
+# SLURM job logs
+slurm/logs/*.out
+slurm/logs/*.err
