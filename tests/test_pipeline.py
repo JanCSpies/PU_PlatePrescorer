@@ -8,7 +8,12 @@ import pytest
 
 from bhpu.chem import build_cn_coupling_product, canonical_smiles, inchikey
 from bhpu.data import schema
-from bhpu.eval import NevesFoldReader, feasibility_metrics, plate_hit_rate_uplift
+from bhpu.eval import (
+    FrozenEvalProtocol,
+    NevesFoldReader,
+    feasibility_metrics,
+    plate_hit_rate_uplift,
+)
 from bhpu.features import ConditionEncoder, DRFPFeaturizer, ECFPFeaturizer
 from bhpu.leakage import LeakageAuditor
 from bhpu.models import CatBoostFeasibilityModel
@@ -160,3 +165,34 @@ def test_pu_learners_recover_positives(learner_name: str) -> None:
     scores = learner.predict_proba(features[unlabeled])
     metrics = feasibility_metrics(true_labels[unlabeled], scores)
     assert metrics.roc_auc > 0.9
+
+
+def _jnj_like_frame() -> pd.DataFrame:
+    """A small JnJ-like frame with several distinct substrates for the split test."""
+    aryls = ["Brc1ccccc1", "Clc1ccncc1", "Ic1ccccc1", "Brc1ccc(C)cc1", "Brc1cccnc1", "Brc1ccco1"]
+    amines = ["C1CCNCC1", "C1COCCN1", "CCN", "CCCN", "C1CCOC1CN", "NCc1ccccc1"]
+    rows = []
+    for i, a in enumerate(aryls):
+        for j, m in enumerate(amines):
+            rows.append({schema.ARYL_SMILES: a, schema.AMINE_SMILES: m, schema.LABEL: (i + j) % 2})
+    return pd.DataFrame(rows)
+
+
+def test_frozen_protocol_is_substrate_disjoint_and_guards_leakage() -> None:
+    from bhpu.eval.protocol import _substrate_key
+
+    jnj = _jnj_like_frame()
+    protocol = FrozenEvalProtocol(jnj, val_fraction=0.5, holdout_axis="both")
+    val, test = protocol.frame("val"), protocol.frame("test")
+
+    # VAL and TEST must share no aryl and no amine.
+    val_aryls = {_substrate_key(s) for s in val[schema.ARYL_SMILES]}
+    test_aryls = {_substrate_key(s) for s in test[schema.ARYL_SMILES]}
+    val_amines = {_substrate_key(s) for s in val[schema.AMINE_SMILES]}
+    test_amines = {_substrate_key(s) for s in test[schema.AMINE_SMILES]}
+    assert val_aryls.isdisjoint(test_aryls)
+    assert val_amines.isdisjoint(test_amines)
+
+    # Training that reuses JnJ substrates must be rejected.
+    with pytest.raises(AssertionError):
+        protocol.assert_training_clean(jnj)
