@@ -18,6 +18,39 @@
 
 ---
 
+## 2026-07-08 — Autonomous run START: frozen protocol + WS1 data recon — Florian's session (claude)
+
+**Decisions locked (Florian, before an 8h autonomous run):** objective = predict JnJ BH C–N
+feasibility **from literature/PU only, never using JnJ labels** (purest thesis). Held-out =
+**substrate-disjoint**. PAYN = **clone & run the real repo** as baseline. Focus order: **C–N data
+expansion+cleaning → domain adaptation/propensity (SAR) → PU-theory problems (bagging/PAYN/SCAR) →
+better features (xtb / OMol-UMA via gpuma / DFT)**. Rules: **no cheating/leakage, don't modify /mnt
+(copy in), never git push.** Master plan in `AUTONOMOUS_RUN.md`.
+
+**WS0 done — frozen anti-cheat eval** (`src/bhpu/eval/protocol.py`, `FrozenEvalProtocol`): JnJ split
+into VAL (2624) / TEST (1920) by whole substrate groups, **val/test share 0 aryls & 0 amines**;
+`assert_training_clean()` rejects any training row reusing a JnJ substrate/pair (verified: raw
+literature = 1384 leaks → filtered to 0). Base rates val 0.32 / test 0.44. Not to be changed to
+inflate scores.
+
+**WS1 recon — C–N mining is rich (structure detector = aryl (pseudo)halide + N–H amine → product):**
+- ORDerly (`/mnt/datasets/ORDerly`, 1.44M condition rows): **~10.6% C–N ≈ 153k couplings**, 52% have
+  yields. Open (CC-BY-SA).
+- ord.csv (`/mnt/datasets/DynaMAIK`, 2GB): **~22.9% C–N** (sample shows XPhos/piperazine BH reactions).
+- Cernak 50k: 50k wells but ~4 substrates → negatives/conditions, not substrate diversity.
+- literature_hte (have): 4,464 positives, already substrate-disjoint from JnJ — cleanest in-domain seed.
+→ Plan: SLURM-parallel miner (structure SMARTS) → canonicalize → dedupe (InChIKey/reaction-hash) →
+leakage-audit vs JnJ (drop any JnJ substrate) → unified positive corpus. ORD's **substrate diversity**
+is the key lever for cross-domain transfer.
+
+**Running:** background research subagent on cross-domain PU (why 0.52, SAR/propensity/importance
+weighting/class-prior-shift, ranked fixes) → will write `docs/literature/notes/theory-crossdomain-pu.md`.
+
+**Next:** build ORD C–N miner (WS1) → re-run baselines under frozen protocol (honest 0.52 start) →
+WS2 domain adaptation → WS3 PAYN clone + PU theory → WS4 xtb/UMA features.
+
+---
+
 ## 2026-07-07 (night) — SLURM online + first benchmark: bagging PU wins decisively — Florian's session (claude)
 
 **SLURM setup (see `docs/slurm.md`):** cluster mapped (CPU 14d / CPU_Express 24h / CPU_Long / GPU

@@ -69,8 +69,11 @@ Predict **feasibility of Buchwald–Hartwig C–N couplings on the JnJ (Neves) t
   to beat honestly).**
 
 ## Status checklist (update as you go)
-- [ ] WS0 protocol frozen + baselines re-run under it (honest starting numbers)
+- [x] WS0 protocol frozen (`FrozenEvalProtocol`; val 2624 / test 1920, both-axis substrate-disjoint;
+      leakage guard tested). TODO: re-run baselines under it for honest starting numbers.
 - [ ] WS1 ORD C–N mining; Cernak adapter; unified positive corpus + leakage audit; source benchmark
+      — CONFIRMED minable: ORDerly ~10.6% C–N (~153k), ord.csv ~22.9%; detector = aryl-halide + N–H
+      amine → product. literature_hte (4,464 pos) is the clean in-domain seed; ORD adds substrate diversity.
 - [ ] WS2 SAR/propensity + grid-U PU; transfer improved over 0.52
 - [ ] WS3 PU-theory notes; PAYN cloned + run as baseline
 - [ ] WS4 xtb features on SLURM; UMA via gpuma (stretch); QM-vs-fingerprint verdict
