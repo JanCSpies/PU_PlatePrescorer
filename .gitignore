@@ -33,3 +33,6 @@ mlruns/
 # SLURM job logs
 slurm/logs/*.out
 slurm/logs/*.err
+
+# Colleague's separate package (its own git repo)
+gpuma/
