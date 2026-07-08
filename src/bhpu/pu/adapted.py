@@ -46,7 +46,7 @@ class DomainAdaptedPULearner(PULearner):
         self,
         model_factory: ModelFactory,
         *,
-        use_coral: bool = True,
+        use_coral: bool = False,
         use_importance_weights: bool = True,
         n_estimators: int = 100,
         subsample_ratio: float = 1.0,
@@ -57,8 +57,12 @@ class DomainAdaptedPULearner(PULearner):
 
         Args:
             model_factory: Zero-arg factory of the base feasibility model (e.g. CatBoost).
-            use_coral: Align positives to the unlabeled/target distribution via CORAL.
-            use_importance_weights: Reweight positives by covariate-shift importance weights.
+            use_coral: Align positives to the unlabeled/target distribution via CORAL. **Off by
+                default:** empirically CORAL *hurts* on high-dimensional sparse fingerprints (the
+                covariance whiten/recolor is unstable and smears the class signal — see RESULTS.md);
+                enable only for dense, low-dimensional feature spaces.
+            use_importance_weights: Reweight positives by covariate-shift importance weights — the
+                lever that lifts literature→JnJ transfer from ≈random to ROC-AUC ~0.72.
             n_estimators: Number of PU-bagging weak learners.
             subsample_ratio: Unlabeled subsample size per bag as a multiple of ``|P|``.
             clip_quantile: Upper-quantile clip for importance weights (tames the heavy tail).
