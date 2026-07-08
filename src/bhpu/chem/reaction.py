@@ -20,6 +20,7 @@ import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from bhpu.chem.canonical import inchikey
 from bhpu.data import schema
 
 # Buchwald–Hartwig C–N coupling template: aryl–halide + amine N–H -> aryl–N.
@@ -93,6 +94,62 @@ def coupling_site_indices(
         try:
             Chem.SanitizeMol(product)
         except (Chem.AtomValenceException, Chem.KekulizeException, ValueError):
+            continue
+        carbon_idx: int | None = None
+        nitrogen_idx: int | None = None
+        for atom in product.GetAtoms():
+            mapno = atom.GetPropsAsDict().get("old_mapno")
+            if not atom.HasProp("react_atom_idx"):
+                continue
+            if mapno == 1:
+                carbon_idx = atom.GetIntProp("react_atom_idx")
+            elif mapno == 2:
+                nitrogen_idx = atom.GetIntProp("react_atom_idx")
+        if carbon_idx is None or nitrogen_idx is None:
+            continue
+        leaving_idx = next(
+            (
+                neighbour.GetIdx()
+                for neighbour in aryl.GetAtomWithIdx(carbon_idx).GetNeighbors()
+                if neighbour.GetSymbol() in ("F", "Cl", "Br", "I")
+            ),
+            None,
+        )
+        return carbon_idx, leaving_idx, nitrogen_idx
+    return None
+
+
+@lru_cache(maxsize=200_000)
+def coupling_site_indices_for_product(
+    aryl_halide_smiles: str, amine_smiles: str, product_inchikey: str
+) -> tuple[int, int | None, int] | None:
+    """Locate the reacting atoms of the template outcome that yields a *specific* product.
+
+    Unlike :func:`coupling_site_indices` (which returns the first enumerated outcome), this
+    disambiguates poly-halide / poly-N–H substrates by the *observed* product: it returns the
+    site of whichever outcome reproduces ``product_inchikey``. Used to resolve the true reacting
+    atom of a substrate from a reaction whose product is known.
+
+    Args:
+        aryl_halide_smiles: SMILES of the aryl (pseudo)halide electrophile.
+        amine_smiles: SMILES of the amine nucleophile.
+        product_inchikey: InChIKey of the observed coupling product.
+
+    Returns:
+        ``(aryl_carbon_idx, leaving_halide_idx, amine_nitrogen_idx)`` for the matching outcome,
+        or ``None`` if no sanitisable outcome reproduces the product.
+    """
+    aryl = Chem.MolFromSmiles(aryl_halide_smiles)
+    amine = Chem.MolFromSmiles(amine_smiles)
+    if aryl is None or amine is None:
+        return None
+    for outcome in _CN_COUPLING_RXN.RunReactants((aryl, amine)):
+        product = outcome[0]
+        try:
+            Chem.SanitizeMol(product)
+        except (Chem.AtomValenceException, Chem.KekulizeException, ValueError):
+            continue
+        if inchikey(Chem.MolToSmiles(product)) != product_inchikey:
             continue
         carbon_idx: int | None = None
         nitrogen_idx: int | None = None

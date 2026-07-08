@@ -83,22 +83,37 @@ def _unique_substrates(role: str, datasets: list[str]) -> list[str]:
 # Module-level worker holders (picklable): set per job before the pool starts.
 _MATRIX_FN: MatrixFn | None = None
 _N_CONFORMERS: int = 20
+_SITE_MAP: dict[str, int] = {}
 
 
-def _init_worker(matrix_fn: MatrixFn, n_conformers: int) -> None:
-    """Pool initialiser: bind the per-job matrix function + conformer count into each worker."""
-    global _MATRIX_FN, _N_CONFORMERS
-    _MATRIX_FN, _N_CONFORMERS = matrix_fn, n_conformers
+def _init_worker(matrix_fn: MatrixFn, n_conformers: int, site_map: dict[str, int]) -> None:
+    """Pool initialiser: bind the matrix function, conformer count and site map into each worker."""
+    global _MATRIX_FN, _N_CONFORMERS, _SITE_MAP
+    _MATRIX_FN, _N_CONFORMERS, _SITE_MAP = matrix_fn, n_conformers, site_map
 
 
 def _worker(smiles: str) -> tuple[str, np.ndarray | None, list[float] | None]:
     """Compute one substrate's per-conformer descriptor matrix (picklable pool worker)."""
     assert _MATRIX_FN is not None
-    result = _MATRIX_FN(smiles, n_conformers=_N_CONFORMERS)
+    override = _SITE_MAP.get(smiles)
+    result = _MATRIX_FN(smiles, n_conformers=_N_CONFORMERS, site_override=override)
     if result is None:
         return smiles, None, None
     matrix, energies = result
     return smiles, matrix, energies
+
+
+def _load_site_map(role: str, use_resolved: bool) -> dict[str, int]:
+    """Load a product-resolved reacting-atom map for a role (empty if disabled/absent)."""
+    if not use_resolved:
+        return {}
+    filename = "aryl_site_map.parquet" if role == "aryl" else "amine_site_map.parquet"
+    path = FEATURES_DIR / filename
+    if not path.exists():
+        return {}
+    frame = pd.read_parquet(path)
+    index_col = "carbon_idx" if role == "aryl" else "nitrogen_idx"
+    return {s: int(i) for s, i in zip(frame["smiles"], frame[index_col], strict=True)}
 
 
 def _run_job(
@@ -109,20 +124,25 @@ def _run_job(
     n_conformers: int,
     workers: int,
     limit: int | None,
+    use_resolved_sites: bool,
 ) -> None:
     """Compute per-conformer matrices for one (method, role) and write all aggregation caches."""
     matrix_fn, names = _JOBS[(method, role)]
     substrates = _unique_substrates(role, datasets)
     if limit is not None:
         substrates = substrates[:limit]
-    print(f"\n[{method}/{role}] {len(substrates)} substrates x {n_conformers} conformers ...")
+    site_map = _load_site_map(role, use_resolved_sites)
+    overrides = f", {len(site_map)} resolved-site overrides" if site_map else ""
+    print(
+        f"\n[{method}/{role}] {len(substrates)} substrates x {n_conformers} conformers{overrides}"
+    )
 
     start = time.time()
     per_mode: dict[str, list[dict[str, object]]] = {mode: [] for mode in AGGREGATION_MODES}
     n_failed = 0
     ctx = get_context("forkserver")
     with ctx.Pool(
-        processes=workers, initializer=_init_worker, initargs=(matrix_fn, n_conformers)
+        processes=workers, initializer=_init_worker, initargs=(matrix_fn, n_conformers, site_map)
     ) as pool:
         for i, (smiles, matrix, energies) in enumerate(
             pool.imap_unordered(_worker, substrates, chunksize=8)
@@ -157,6 +177,11 @@ def main() -> None:
     parser.add_argument("--n-conformers", type=int, default=20)
     parser.add_argument("--workers", type=int, default=90)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--use-resolved-sites",
+        action="store_true",
+        help="Override the template site with product-resolved sites (scripts/14 maps).",
+    )
     args = parser.parse_args()
 
     datasets = [d.strip() for d in args.datasets.split(",") if d.strip()]
@@ -171,6 +196,7 @@ def main() -> None:
                 n_conformers=args.n_conformers,
                 workers=args.workers,
                 limit=args.limit,
+                use_resolved_sites=args.use_resolved_sites,
             )
 
 
