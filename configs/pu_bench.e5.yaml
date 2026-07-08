@@ -1,0 +1,37 @@
+# E5: best-performance push on the winning substrate-only ECFP.
+# Confirms the base-learner effect (CatBoost vs HistGB) and lightly tunes HistGB regularisation.
+# Model selection = highest VAL ROC-AUC; report that model's TEST ROC-AUC (good practice).
+# sbatch --partition=CPU scripts_JSP/pubench_run.sbatch configs/pu_bench.e5.yaml
+
+data:
+  root: final_datasets
+  positives: merged
+
+seed: 0
+threshold_strategy: val_youden
+out_dir: artifacts/pubench/e5
+
+featurizers:
+  - name: ecfp
+    label: ecfp_subs_only
+    params: { radius: 2, n_bits: 2048, use_conditions: false }
+
+models:
+  - name: supervised
+    label: sup_catboost
+    params: { base: catboost, iterations: 300, depth: 6 }
+  - name: supervised
+    label: sup_histgb
+    params: { base: histgb, iterations: 300, learning_rate: 0.1 }
+  - name: supervised
+    label: sup_histgb_l2
+    params: { base: histgb, iterations: 400, learning_rate: 0.05, l2_regularization: 1.0 }
+  - name: supervised
+    label: sup_histgb_shallow
+    params: { base: histgb, iterations: 400, learning_rate: 0.05, max_leaf_nodes: 15, l2_regularization: 1.0 }
+  - name: bagging_pu
+    label: bagging25
+    params: { n_estimators: 25, max_iter: 300, learning_rate: 0.05 }
+  - name: elkan_noto
+    label: elkan
+    params: { max_iter: 300, learning_rate: 0.1 }
