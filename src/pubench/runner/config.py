@@ -29,7 +29,7 @@ class DataConfig:
 class ComponentSpec:
     """A registry-resolved component: a ``name`` plus constructor ``params``.
 
-    Attributes
+    Attributes:
     ----------
     name:
         Registry key of the component.

@@ -93,6 +93,8 @@ class NonNegativePU(PUModel):
         self.prior_: float | None = None
         self._w: np.ndarray | None = None
         self._b: float = 0.0
+        # Optional per-positive importance weights (set by ImportanceWeightedPU); None = uniform.
+        self._p_weights: np.ndarray | None = None
 
     def fit(  # noqa: D102 (inherited)
         self, P: np.ndarray, U: np.ndarray, *, val: LabeledArrays | None = None
@@ -103,6 +105,11 @@ class NonNegativePU(PUModel):
             else build_prior_estimator(self.prior_method, {"seed": self.seed}).estimate(P, U)
         )
         self.prior_ = pi
+        if self._p_weights is None:
+            wp = np.full(len(P), 1.0 / len(P), dtype=P.dtype)
+        else:
+            wp = np.asarray(self._p_weights, dtype=P.dtype)
+            wp = wp / wp.sum()
         rng = np.random.default_rng(self.seed)
         n_features = P.shape[1]
         # Match the feature dtype (float32): a float64 w would upcast-copy the whole U matrix
@@ -110,25 +117,31 @@ class NonNegativePU(PUModel):
         w: np.ndarray = np.asarray(rng.normal(scale=0.01, size=n_features), dtype=P.dtype)
         b: float = 0.0
         for _ in range(self.epochs):
-            w, b = self._step(P, U, w, b, pi)
+            w, b = self._step(P, U, w, b, pi, wp)
         self._w, self._b = w, b
         return self
 
     def _step(
-        self, P: np.ndarray, U: np.ndarray, w: np.ndarray, b: float, pi: float
+        self, P: np.ndarray, U: np.ndarray, w: np.ndarray, b: float, pi: float, wp: np.ndarray
     ) -> tuple[np.ndarray, float]:
-        """Perform one full-batch nnPU gradient update and return the new ``(w, b)``."""
+        """Perform one full-batch (importance-weighted) nnPU update; return the new ``(w, b)``.
+
+        ``wp`` are per-positive weights summing to 1 (uniform for plain nnPU); they reweight the
+        positive-risk terms toward the target marginal for :class:`ImportanceWeightedPU`.
+        """
         s_p = P @ w + b
         s_u = U @ w + b
         # d(positive loss)/ds = -sigmoid(-s); d(negative loss)/ds = sigmoid(s)
-        grad_p_plus_w = P.T @ (-_sigmoid(-s_p)) / len(P)
-        grad_p_plus_b = float(np.mean(-_sigmoid(-s_p)))
-        grad_p_minus_w = P.T @ _sigmoid(s_p) / len(P)
-        grad_p_minus_b = float(np.mean(_sigmoid(s_p)))
+        dpos_p = -_sigmoid(-s_p)
+        dneg_p = _sigmoid(s_p)
+        grad_p_plus_w = P.T @ (wp * dpos_p)
+        grad_p_plus_b = float(wp @ dpos_p)
+        grad_p_minus_w = P.T @ (wp * dneg_p)
+        grad_p_minus_b = float(wp @ dneg_p)
         grad_u_minus_w = U.T @ _sigmoid(s_u) / len(U)
         grad_u_minus_b = float(np.mean(_sigmoid(s_u)))
 
-        neg_risk = float(np.mean(_softplus(s_u)) - pi * np.mean(_softplus(s_p)))
+        neg_risk = float(np.mean(_softplus(s_u)) - pi * (wp @ _softplus(s_p)))
         grad_neg_w = grad_u_minus_w - pi * grad_p_minus_w
         grad_neg_b = grad_u_minus_b - pi * grad_p_minus_b
 
