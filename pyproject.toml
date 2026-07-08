@@ -41,6 +41,11 @@ models = [
     "tabpfn>=2.0",           # Pretrained tabular foundation model (limited-label regime)
     "chemprop>=2.1",         # Directed-MPNN graph model over reaction/molecule SMILES
 ]
+# Semiempirical QM descriptors (GFN2-xTB electronics per substrate) for the WS4 feature arm.
+# Install with:  uv sync --extra qm   (or: uv pip install tblite)
+qm = [
+    "tblite>=0.6",           # GFN2-xTB single-point charges / HOMO-LUMO / dipole via Python bindings
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -104,6 +109,7 @@ module = [
     "seaborn.*",
     "tabpfn.*",
     "chemprop.*",
+    "tblite.*",
 ]
 ignore_missing_imports = true
 
