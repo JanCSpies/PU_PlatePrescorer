@@ -131,10 +131,40 @@ substrates in 45 s via `tblite`) added to or replacing ECFP, winning IW-PU confi
 
 xTB-only carries real (if weaker) signal, but **adding xTB to ECFP *hurts*** — the 18 continuous
 global descriptors dilute the 4096-bit fingerprint. **Verdict: connectivity fingerprints suffice;
-global semiempirical descriptors do not add advantage for feasibility here.** (Caveat: these are
-whole-molecule descriptors; *site-specific* reactive-atom electronics — C–X electrophilicity, N
-nucleophilicity — or UMA/OMol25 MLIP embeddings via `gpuma` remain untested and are the natural
-next probe.)
+global semiempirical descriptors do not add advantage for feasibility here.** (This left open the
+*site-specific* question — answered next.)
+
+## WS5: do *site-specific* descriptors help? (`scripts/12`–`15`) — **no (robust)**
+
+The WS4 caveat was that whole-molecule descriptors average away local reactivity. So we built
+**reactive-site** features at the atoms that actually couple: **morfeus sterics** (Sterimol/%V_bur/
+SASA at the aryl C–X carbon along the N-approach axis; %V_bur/pyramidalisation/SASA at the amine N)
+and **g-xTB electronics** (Grimme 2025, ≈ωB97M-V: gap/IP/EA/dipole + per-atom EEQ_BC charge & Wiberg
+BO *at the reacting atom*), over **20-conformer** ensembles with three aggregation modes. Reacting
+atoms were **product-resolved** (`scripts/14`: the template's canonical site is only 36.7% correct
+on ambiguous multi-site substrates, so we take the site that reproduces the observed product).
+Subset-first eval (JnJ+lit+grid, IW-PU, frozen protocol), best TEST ROC-AUC per feature:
+
+| feature | transductive | inductive |
+|---|---|---|
+| **ECFP (baseline)** | **0.709** | **0.448** |
+| morfeus (site sterics) | 0.680 | 0.471 |
+| g-xTB (site electronics) | 0.598 | 0.381 |
+| morfeus ⊕ g-xTB | 0.626 | 0.421 |
+| ECFP ⊕ site | 0.702 | 0.380 |
+
+- **ECFP wins transductively; nothing beats ~0.47 inductively** (ECFP 0.448). Adding site
+  descriptors to ECFP *hurts* the inductive case (0.35–0.38).
+- **Conformer aggregation: `mean` ≥ `boltzmann` > `lowest`** — the single lowest-energy conformer is
+  the worst choice; averaging over the ensemble is best.
+- **Domain-shortcut AUC = 1.000 for all 26 arms** — physical descriptors are *not* more
+  domain-invariant than fingerprints; the shortcut is not a representation artifact.
+
+**Verdict:** even proper site-specific physics (correct atoms, sterics + g-xTB electronics, conformer
+ensembles) does **not** beat ECFP and does **not** solve novel-substrate generalisation. The
+inductive gap needs a different lever (substrate-aware domain adaptation, or condition/context
+features), not richer per-substrate descriptors. Descriptors were therefore **not** scaled beyond
+the subset (per the "no wasted compute on a negative" rule).
 
 ## Honest caveats / next
 

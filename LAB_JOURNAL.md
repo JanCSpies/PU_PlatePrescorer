@@ -18,6 +18,56 @@
 
 ---
 
+## 2026-07-08 — Site-specific descriptors (morfeus + g-xTB + conformers): a clean NEGATIVE — Florian's session (claude)
+
+**Context/Hypothesis:** Whole-molecule GFN2-xTB didn't help (earlier entry). The hypothesis was
+that the failure was *resolution*, not QM: proper **site-specific** descriptors at the reacting
+atoms — sterics at the aryl C–X carbon and amine N, plus better electronics — might beat ECFP and,
+crucially, help the **inductive** (novel-substrate) case. Also test the sub-hypothesis that physical
+descriptors are more **domain-invariant** than fingerprints (lower domain-shortcut AUC).
+
+**What I did (all this session, gated green):**
+- `chem/sites.py`: BH-template reactive-site locator (aryl C–X carbon, amine N); multi-conformer
+  ETKDG+MMFF embedding; boltzmann/lowest/mean aggregation.
+- `features/morfeus_desc.py`: Sterimol L/B1/B5, %V_bur, SASA at the C–X carbon (along the N-approach
+  axis); %V_bur, pyramidalisation, SASA at the amine N. `features/gxtb.py`: g-xTB (Grimme 2025,
+  ≈ωB97M-V) gap/IP/EA/dipole + **per-atom EEQ_BC charge & Wiberg BO at the reacting atom**.
+- **Reaction-center validation** (`scripts/13`): template site is 100% correct on single-site
+  substrates (56% of ORD) but only **36.7%** on ambiguous multi-site (poly-halide/poly-N–H).
+  → **Product-guided resolution** (`scripts/14`, `coupling_site_indices_for_product`): resolve the
+  *observed* reacting atom from reactions with known products (57,020 reactions → 14,377 aryl +
+  10,152 amine site overrides).
+- **Subset-first** eval (`scripts/12`,`15`; JnJ+lit+grid, 1,476 substrates, 20 conformers, 3 modes):
+  IW-PU on the frozen protocol, transductive + inductive, 26 arms.
+
+**Result (subset, TEST ROC-AUC):**
+| feature | transductive (best mode) | inductive (best mode) |
+|---|---|---|
+| **ECFP (baseline)** | **0.709** | **0.448** |
+| morfeus (sterics) | 0.68 (mean) | 0.471 (mean) |
+| g-xTB (electronics) | 0.60 (mean) | 0.38 |
+| site (morfeus+g-xTB) | 0.63 (mean) | 0.42 |
+| ecfp + site | 0.70 (lowest) | 0.38 |
+
+- **Domain-shortcut AUC = 1.000 for ALL 26 arms** — physical descriptors do **not** reduce
+  literature-vs-JnJ separability (sub-hypothesis refuted).
+- **Conformer aggregation: mean ≥ boltzmann > lowest** (morfeus mean 0.68 vs boltzmann 0.59 vs
+  lowest 0.58; same ordering for g-xTB and the combo). Lowest-energy is the worst.
+- **No descriptor breaks the ~0.47 inductive ceiling**; ecfp+site *hurts* inductively (0.35–0.38).
+
+**Interpretation / decision:** A **robust negative**. Even with correct reacting atoms
+(product-resolved), site sterics + g-xTB electronics, 20-conformer ensembles, and 3 aggregation
+strategies, **connectivity fingerprints (ECFP) remain the best feature** for this transfer, and
+site descriptors do **not** solve novel-substrate generalisation. The domain shortcut is not a
+representation artifact — it persists across every feature type. Per Florian's "don't compute every
+molecule if the effect is negative" rule: **descriptors are NOT scaled to the full corpus.** The
+open inductive problem needs a different lever (e.g. substrate-aware DA, or reaction-condition
+context), not richer per-substrate physics.
+
+**Next:** Pistachio **data expansion** (orthogonal to descriptors): mined **201,340** unique
+JnJ-leak-free C–N pairs (0 exact test pairs, 54,937 with Pd — 20× ORD), gitignored per licence.
+Running lit vs lit+ORD vs lit+ORD+Pistachio on ECFP IW-PU (`scripts/16`) — result pending.
+
 ## 2026-07-08 — RESULTS: better-PAYN transfer, xTB verdict, transductive limit — Florian's session (claude)
 
 **Full transfer sweep** (`scripts/06`+`09`, frozen protocol, VAL-selected → TEST reported once).

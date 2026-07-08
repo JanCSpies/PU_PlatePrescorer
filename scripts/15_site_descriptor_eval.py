@@ -152,7 +152,7 @@ def _evaluate(
 
     def factory() -> CatBoostFeasibilityModel:
         return CatBoostFeasibilityModel(
-            iterations=400, depth=6, learning_rate=0.05, random_state=seed
+            iterations=300, depth=6, learning_rate=0.05, random_state=seed
         )
 
     learner = BaggingPULearner(factory, n_estimators=n_estimators, random_state=seed)
@@ -198,10 +198,12 @@ def main() -> None:
         (feature, mode) for feature in ("morfeus", "gxtb", "site", "ecfp_site") for mode in MODES
     ]
 
+    ARTIFACTS_DIR.mkdir(exist_ok=True)
+    out_path = ARTIFACTS_DIR / "site_descriptor_eval.json"
     results: list[dict[str, object]] = []
     header = f"\n{'feature':<10} {'mode':<10} {'grid':<12} {'dom':>5} {'VAL':>6} {'TEST':>6}"
-    print(f"{header} {'TE_AP':>6}")
-    print("-" * 62)
+    print(f"{header} {'TE_AP':>6}", flush=True)
+    print("-" * 62, flush=True)
     for feature, mode in arms:
         for grid_name, grid_mask in grids.items():
             metrics = _evaluate(
@@ -218,12 +220,12 @@ def main() -> None:
             results.append(row)
             print(
                 f"{feature:<10} {mode:<10} {grid_name:<12} {metrics['domain_auc']:>5} "
-                f"{metrics['val_auc']:>6} {metrics['test_auc']:>6} {metrics['test_auprc']:>6}"
+                f"{metrics['val_auc']:>6} {metrics['test_auc']:>6} {metrics['test_auprc']:>6}",
+                flush=True,
             )
-
-    ARTIFACTS_DIR.mkdir(exist_ok=True)
-    (ARTIFACTS_DIR / "site_descriptor_eval.json").write_text(json.dumps(results, indent=2))
-    print(f"\nWrote {ARTIFACTS_DIR / 'site_descriptor_eval.json'}")
+            # Write after every arm so a preemption keeps the results computed so far.
+            out_path.write_text(json.dumps(results, indent=2))
+    print(f"\nWrote {out_path}", flush=True)
 
 
 if __name__ == "__main__":
