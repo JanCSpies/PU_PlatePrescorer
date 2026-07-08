@@ -166,6 +166,38 @@ inductive gap needs a different lever (substrate-aware domain adaptation, or con
 features), not richer per-substrate descriptors. Descriptors were therefore **not** scaled beyond
 the subset (per the "no wasted compute on a negative" rule).
 
+## WS6: reaction conditions — the biggest untapped signal (`scripts/17`,`18`)
+
+We had been encoding **only the substrates** (aryl⊕amine ECFP) — no catalyst/ligand/base/solvent.
+But JnJ is a **condition screen**: 1,137 condition sets (32 cat × 8 base × 6 solv), and **conditions
+drive 43% of the label variance**, flipping outcome for **35%** of pairs. So the 0.72 is a
+substrate-pair number blind to ~43% of the signal.
+
+| | TEST ROC-AUC |
+|---|---|
+| **In-domain** (supervised JnJ VAL→TEST, conditions *shared*), substrate | 0.609 |
+| **In-domain, substrate ⊕ condition-FP** | **0.769  (+0.16)** |
+| Transfer (lit→JnJ), substrate | 0.69 |
+| Transfer, substrate ⊕ condition-FP | **0.26 (crash)** |
+
+- **Conditions are real, learnable, and large** (+0.16 AUC in-domain) — encoding them is the
+  highest-value direction left.
+- **But structural condition fingerprints crash in transfer** (0.69→0.26): literature and JnJ share
+  only **8 of 81 catalysts**, so condition FPs become a literature-vs-JnJ **domain tag** (the same
+  mechanism that sank reagent-inclusive DRFP). Rebuilding U to span JnJ conditions was necessary but
+  not sufficient — the *positives* (literature) still don't use JnJ's conditions.
+- **→ The fix is condition *descriptors*** (shared physical space: ligand %V_bur/electronics, base
+  pKa, solvent parameters), so a bulky electron-rich literature ligand and a different-but-similar
+  JnJ ligand map close. That is the clear next build.
+
+## Data expansion: Pistachio (`scripts/16`) — a modest, real gain
+
+Mining Pistachio added **201,340** product-confirmed, **JnJ-leak-free** C–N pairs (0 exact test
+pairs; 54,937 with Pd). On ECFP IW-PU it lifts transfer **TEST 0.721 → 0.736** (VAL 0.771→0.779) and
+raises the importance-weighting effective sample size **6,627 → 28,149** (4× more JnJ-like
+positives). Pistachio is **licensed** (corpus gitignored, never published) — so the **publishable
+headline stays ORD-only (0.721)**; 0.736 is an internal enhancement.
+
 ## Honest caveats / next
 
 - **The headline is transductive** (see Robustness). Inductive generalization to novel substrates is

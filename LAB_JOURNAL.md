@@ -18,6 +18,55 @@
 
 ---
 
+## 2026-07-08 — Conditions ARE the signal (+0.16 in-domain) + Pistachio helps — Florian's session (claude)
+
+**Context/Hypothesis:** Florian flagged that we encode **only substrates** (aryl⊕amine ECFP) and
+ignore catalyst/ligand/base/solvent — the thing HTE screens. Verified: the winning model uses
+`SUBSTRATE_COLUMNS` only; no conditions, no product. And in JnJ, conditions drive **43%** of the
+label variance (within-pair) and **35%** of pairs flip outcome across the **1,137** condition sets
+(32 cat × 8 base × 6 solv). So the 0.72 is a substrate-pair number, structurally blind to ~43% of
+the signal.
+
+**What I did:**
+- `features/condition_fp.py`: structural ECFP of catalyst/base/solvent SMILES (JnJ catalyst SMILES
+  are full Pd precatalyst complexes → metal+ligand captured).
+- `scripts/17`: condition-aware transfer — rebuilt U to **span the JnJ condition space** (unmeasured
+  pairs × conditions sampled from the JnJ condition distribution, ~85k rows), IW-PU, per-row
+  condition-level target, substrate vs substrate+condition, transductive + inductive.
+- `scripts/18`: in-domain diagnostic — supervised JnJ VAL→TEST (substrate-disjoint, **conditions
+  shared**), substrate vs substrate+condition. (Breaks train-purity by design; reported as a probe.)
+- `scripts/16`: Pistachio data-expansion (lit vs +ORD vs +ORD+Pistachio, ECFP IW-PU).
+
+**Result:**
+| | TEST ROC-AUC |
+|---|---|
+| **In-domain (shared conditions), substrate** | 0.609 |
+| **In-domain, substrate+condition** | **0.769  (+0.16!)** |
+| Transfer (lit→JnJ, disjoint conditions), substrate | 0.69 |
+| Transfer, substrate+condition | **0.26  (CRASH, below random)** |
+| Pistachio expansion: lit / lit+ORD / lit+ORD+Pistachio | 0.708 / 0.721 / **0.736** |
+
+**Interpretation / decision:**
+- **Conditions are real, learnable, and large**: +0.16 AUC in-domain. Florian is right — they must
+  be encoded.
+- **But structural condition fingerprints CRASH in transfer** (0.69→0.26): literature and JnJ share
+  only **8/81 catalysts**, so condition FPs become a perfect literature-vs-JnJ domain tag (same
+  mechanism that sank reagent-inclusive DRFP). Rebuilding U to span JnJ conditions was necessary but
+  not sufficient — the *positives* (literature) still don't use JnJ's conditions.
+- **→ Next lever = condition DESCRIPTORS** (a shared physical space: ligand %V_bur/electronics, base
+  pKa, solvent parameters) so a bulky-rich lit ligand and a different-but-similar JnJ ligand map
+  close. Structural FPs can't bridge disjoint condition sets; descriptors can. (This is exactly the
+  descriptor route we deferred; the data now strongly motivates it.)
+- **Pistachio helps** (open-data caveat: licensed, gitignored): +201k JnJ-leak-free pairs lift
+  transfer TEST 0.721→**0.736** and effective sample size 6.6k→28k (4×). Publishable headline stays
+  ORD-only (0.721); Pistachio is an internal enhancement.
+
+**Next:** condition descriptors (ligand/base/solvent physical features) + a combined model
+(literature-PU for substrate feasibility ⊕ condition descriptors for condition effects), since the
+diagnostics show substrate signal (PU, 0.72) and condition signal (in-domain, +0.16) are
+complementary. Also: ReactionDataExtractor2 (Wilary & Cole, image→reaction extraction — NOT an
+atom-mapper) is a candidate *future data source* for literature reactions with conditions.
+
 ## 2026-07-08 — Site-specific descriptors (morfeus + g-xTB + conformers): a clean NEGATIVE — Florian's session (claude)
 
 **Context/Hypothesis:** Whole-molecule GFN2-xTB didn't help (earlier entry). The hypothesis was
