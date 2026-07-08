@@ -108,7 +108,9 @@ def test_iw_pu_weights_vary_when_densities_differ() -> None:
     far = rng.normal(np.r_[-3.0, np.zeros(dim - 1)], 1.0, (150, dim))  # outside U's support
     p = np.vstack([near, far])
     u = rng.normal(np.r_[2.0, np.zeros(dim - 1)], 1.0, (400, dim))
-    val = LabeledArrays(np.vstack([near[:20], far[:20]]), np.r_[np.ones(20), np.zeros(20)].astype(int))
+    val = LabeledArrays(
+        np.vstack([near[:20], far[:20]]), np.r_[np.ones(20), np.zeros(20)].astype(int)
+    )
     model = ImportanceWeightedPU(prior=0.5, epochs=20, project_dim=None, density_ratio="rulsif")
     model.fit(p, u, val=val)
     assert model._p_weights is not None

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from pubench.features import FEATURIZERS, ECFPFeaturizer, build_featurizer
+from pubench.features import FEATURIZERS, DRFPFeaturizer, ECFPFeaturizer, build_featurizer
 
 
 def _records() -> pd.DataFrame:
@@ -44,6 +44,23 @@ def test_ecfp_substrate_only_is_narrower() -> None:
     subs_only = ECFPFeaturizer(n_bits=64, use_conditions=False)
     assert subs_only.n_features < with_cond.n_features
     assert subs_only.fit_transform(_records()).shape == (2, subs_only.n_features)
+
+
+def test_drfp_registered_and_shape() -> None:
+    """DRFPFeaturizer self-registers and encodes aryl.amine>>product to the right width."""
+    assert "drfp" in FEATURIZERS.names()
+    assert isinstance(build_featurizer("drfp"), DRFPFeaturizer)
+    records = pd.DataFrame(
+        {
+            "Aryl SMILES": ["Brc1ccccc1", "Brc1ccncc1"],
+            "Amine SMILES": ["C1COCCN1", "C1CCNCC1"],
+            "Product SMILES": ["c1ccc(N2CCOCC2)cc1", "c1cc(N2CCCCC2)ncc1"],
+        }
+    )
+    feat = DRFPFeaturizer(n_bits=128)
+    x = feat.fit_transform(records)
+    assert x.shape == (2, 128)
+    assert x.sum() > 0  # non-trivial fingerprint
 
 
 def test_metal_onehot() -> None:
