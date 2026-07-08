@@ -45,6 +45,11 @@ def main() -> None:
         help="Parquet of mined positive substrate pairs to add (requires --featurizer ecfp2048).",
     )
     parser.add_argument("--tag", default="", help="Suffix for the artifacts filename.")
+    parser.add_argument(
+        "--inductive",
+        action="store_true",
+        help="Drop grid-U rows reusing a TEST substrate (inductive robustness check).",
+    )
     args = parser.parse_args()
 
     extra_features = None
@@ -60,6 +65,7 @@ def main() -> None:
         n_estimators=args.n_estimators,
         random_state=args.seed,
         extra_positive_features=extra_features,
+        exclude_test_substrates_from_grid=args.inductive,
     )
     summary = experiment.summary()
     print("=== Transfer experiment ===")

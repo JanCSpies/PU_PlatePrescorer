@@ -99,6 +99,7 @@ class TransferExperiment:
         random_state: int = 0,
         extra_positive_features: np.ndarray | None = None,
         extra_positive_label: str = "ORD",
+        exclude_test_substrates_from_grid: bool = False,
     ) -> None:
         """Load cached features and build the frozen split.
 
@@ -113,6 +114,9 @@ class TransferExperiment:
                 leakage-audited against JnJ. Enters the PU positive set and the source marginal; the
                 supervised arms stay literature-only (they need measured negatives).
             extra_positive_label: Provenance tag for the extra corpus (for logging).
+            exclude_test_substrates_from_grid: If ``True``, drop grid-U rows that reuse a TEST
+                substrate — an **inductive** robustness check (U no longer contains the held-out
+                test substrate structures, so any transfer gain cannot lean on transduction).
         """
         self._dir = features_dir
         self._featurizer = featurizer
@@ -148,12 +152,38 @@ class TransferExperiment:
         self._x_val, self._y_val = self._x_jnj[self._val_idx], self.protocol.labels("val")
         self._x_test, self._y_test = self._x_jnj[self._test_idx], self.protocol.labels("test")
 
+        self._inductive = exclude_test_substrates_from_grid
+        if exclude_test_substrates_from_grid:
+            self._x_grid = self._x_grid[self._grid_keep_mask()]
+
         # One covariate-shift discriminator (source marginal vs JnJ-grid marginal) reused by every
         # importance-weighted arm; its AUC is the headline domain-shortcut diagnostic.
         self._discriminator = DomainDiscriminator(random_state=random_state).fit(
             self._x_source, self._x_grid
         )
         self.domain_auc: float = self._discriminator.domain_auc_
+
+    def _grid_keep_mask(self) -> np.ndarray:
+        """Boolean mask of grid rows that reuse **no** TEST substrate (for the inductive check)."""
+        from bhpu.eval.protocol import _substrate_key
+
+        grid = pd.read_parquet(self._dir / "unlabeled_grid.parquet")
+        test = self._jnj_frame.loc[self._test_idx]
+        test_keys = {
+            k
+            for col in (schema.ARYL_SMILES, schema.AMINE_SMILES)
+            for s in test[col]
+            if (k := _substrate_key(s)) is not None
+        }
+        aryl_keys = [_substrate_key(s) for s in grid[schema.ARYL_SMILES]]
+        amine_keys = [_substrate_key(s) for s in grid[schema.AMINE_SMILES]]
+        keep: np.ndarray = np.array(
+            [
+                a not in test_keys and n not in test_keys
+                for a, n in zip(aryl_keys, amine_keys, strict=True)
+            ]
+        )
+        return keep
 
     def _load(self, name: str) -> np.ndarray:
         """Load the ``X`` matrix from a cached ``.npz`` feature file."""
@@ -307,5 +337,6 @@ class TransferExperiment:
             "extra_corpus": None if self._extra_pos is None else self._extra_label,
             "n_literature_marginal": len(self._x_source),
             "n_grid_unlabeled": len(self._x_grid),
+            "inductive_grid": self._inductive,
             **self.protocol.summary(),
         }
