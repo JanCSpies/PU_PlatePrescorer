@@ -57,4 +57,26 @@ Data (unless noted): P = `positives_merged_bh` (64,061 Pd-BH, ORD+Pistachio), U 
   - **Conditions need descriptors, not fingerprints** (pending Florian's gpuma/xTB features).
   - Best-so-far target to beat: **test ROC-AUC 0.594**.
 
+## E-DIAG — P-vs-U domain-discriminator AUC (the core obstacle) ⭐
+- **Setup:** train a HistGradientBoosting classifier to tell P (merged literature positives) from U
+  (JnJ-space unlabeled), 3-fold CV, 8k+8k subsample. High AUC ⇒ the two live in disjoint feature
+  regions (covariate shift / domain tag); 0.5 ⇒ indistinguishable.
+- **Result:** **AUC = 1.000** for *both* `ecfp_subs_only` and `ecfp_subs_cond`.
+- **Interpretation (headline):** P and U/test are **essentially non-overlapping in substrate space** —
+  literature (Pistachio/ORD) substrates and the JnJ substrate matrix are different molecules. This is
+  the fundamental cause of everything above:
+  - Transfer is capped near 0.59 because the model must **extrapolate** from P's region into the
+    disjoint U/test region; there is almost no covariate overlap to carry a decision boundary across.
+  - PU / importance-weighting / density-ratio methods are structurally handicapped: a P-vs-U
+    classifier learns *"is this a literature molecule?"* (AUC 1.0), not *"does it react?"*; and
+    `p_U/p_P` is ill-posed when the supports barely overlap (→ the RuLSIF degeneracy in E2).
+  - The naive supervised baseline still reaches ~0.59 by picking up a weak, scaffold-invariant
+    substructure signal — likely near the ceiling for this representation + positive set.
+- **Implication:** the only lever that can genuinely shrink this gap is a **shift-invariant, physical
+  representation** (ligand/base/solvent + substrate *descriptors*: %Vbur, Sterimol, gap/IP/EA, pKa,
+  polarity) rather than scaffold fingerprints — the ADR-005/006 thesis, now strongly re-motivated.
+  Florian's g-xTB/morfeus substrate descriptors exist but cover **100% of test yet only ~1% of the
+  merged-P (Pistachio) substrates**, so they cannot train on P until computed for the P vocabulary
+  (a GPU job). This is the recommended next investment; it is the bottleneck, not the algorithm.
+
 <!-- New experiments appended below. -->
