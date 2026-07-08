@@ -79,4 +79,16 @@ Data (unless noted): P = `positives_merged_bh` (64,061 Pd-BH, ORD+Pistachio), U 
   merged-P (Pistachio) substrates**, so they cannot train on P until computed for the P vocabulary
   (a GPU job). This is the recommended next investment; it is the bottleneck, not the algorithm.
 
+## Leakage audit (merged P) — clean ✅
+Verified on the pubench-loaded splits (`inchikey` identities):
+- P substrate ∩ test = 0; P substrate ∩ val = 0 (no training substrate in the eval sets).
+- P pair ∩ test = 0; P pair ∩ val = 0 (no measured eval reaction is used as a positive).
+- U pair ∩ test = 0; U pair ∩ val = 0 (U excludes measured pairs).
+- val substrate ∩ test = 0 (substrate-disjoint eval split, `FrozenEvalProtocol`).
+- U substrate ∩ test = 78 — **expected & label-free**: U reuses the JnJ substrate vocabulary
+  (transductive PU); no labels leak. For a strictly inductive protocol, restrict U to val-side
+  substrates. Given the P↔U/test domain gap (E-DIAG, AUC 1.0), this sharing does not aid transfer.
+- Training uses P + U only; thresholds/prior come from val (labelled, allowed); test labels are
+  touched once, at final scoring.
+
 <!-- New experiments appended below. -->
