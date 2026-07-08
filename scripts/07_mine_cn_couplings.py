@@ -31,12 +31,16 @@ from bhpu.data.mining import (
     detect_batch,
     iter_ord_csv,
     iter_orderly,
+    iter_pistachio_csv,
 )
 from bhpu.eval.protocol import FrozenEvalProtocol
 
 JNJ_PATH = Path("datasets/processed/test_jnj_hte_2024.parquet")
 ORD_CSV = Path("/mnt/datasets/DynaMAIK/ord.csv")
 ORDERLY_DIR = Path("/mnt/datasets/ORDerly")
+# Pistachio is LICENSED: read the shared copy only; its mined corpus must stay gitignored
+# (write with --out private/... ) and must never be published.
+PISTACHIO_CSV = Path("/mnt/datasets/pistachio/releases/latest/data/pistachio.smi.deduped.csv")
 OUT_DIR = Path("datasets/processed")
 ORDERLY_FILES = {
     "ORDerly-forward": "orderly_forward_train.parquet",
@@ -53,6 +57,8 @@ def _raw_stream(sources: list[str]) -> Iterator[RawReaction]:
             path = ORDERLY_DIR / filename
             if path.exists():
                 yield from iter_orderly(path, source=tag)
+    if "pistachio" in sources and PISTACHIO_CSV.exists():
+        yield from iter_pistachio_csv(PISTACHIO_CSV, source="Pistachio")
 
 
 def _batched(stream: Iterator[RawReaction], size: int) -> Iterator[list[RawReaction]]:
@@ -107,9 +113,10 @@ def main() -> None:
 
     frame = miner.to_frame()
     elapsed = time.time() - start
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    frame.to_parquet(OUT_DIR / f"{args.out}.parquet", index=False)
-    frame.to_csv(OUT_DIR / f"{args.out}.csv", index=False)
+    out_base = OUT_DIR / args.out
+    out_base.parent.mkdir(parents=True, exist_ok=True)  # supports gitignored private/ subdir
+    frame.to_parquet(out_base.with_suffix(".parquet"), index=False)
+    frame.to_csv(out_base.with_suffix(".csv"), index=False)
 
     report = miner.report
     provenance = {

@@ -202,9 +202,7 @@ def iter_ord_csv(
             )
 
 
-def iter_orderly(
-    path: Path, *, source: str, batch_size: int = 20_000
-) -> Iterator[RawReaction]:
+def iter_orderly(path: Path, *, source: str, batch_size: int = 20_000) -> Iterator[RawReaction]:
     """Stream reactions from an ORDerly parquet (separate reactant/agent/product columns).
 
     Args:
@@ -242,6 +240,45 @@ def iter_orderly(
                 raw_id=str(data.get(id_col)),
                 yield_value=_to_float(raw_yield),
             )
+
+
+def iter_pistachio_csv(
+    path: Path, *, source: str = "Pistachio", chunksize: int = 100_000
+) -> Iterator[RawReaction]:
+    """Stream reactions from a Pistachio ``rxn_smiles`` CSV (atom-mapped reaction SMILES).
+
+    Each row is a single ``reactants>agents>products`` reaction SMILES (agents may be empty,
+    as in ``reactants>>products``). Reactants and agents are pooled as candidate molecules so
+    the Pd catalyst — usually recorded as an agent — is available for the ``has_pd`` flag and
+    for coupling detection; atom maps are stripped downstream by :func:`_clean_smiles`.
+
+    Note:
+        Pistachio is a **licensed** source. The mined corpus derived from it must be kept out of
+        version control and never published (see ``docs/decisions``); this reader only reads the
+        shared ``/mnt`` copy and never modifies it.
+
+    Args:
+        path: Path to ``pistachio.smi.deduped.csv`` (one ``rxn_smiles`` column).
+        source: Provenance tag to stamp on each record.
+        chunksize: Rows per pandas chunk (keeps memory bounded on the multi-GB file).
+
+    Yields:
+        One :class:`RawReaction` per parsable reaction SMILES.
+    """
+    reader = pd.read_csv(path, usecols=["rxn_smiles"], chunksize=chunksize, dtype=str)
+    for chunk in reader:
+        for value in chunk["rxn_smiles"]:
+            if not isinstance(value, str) or ">" not in value:
+                continue
+            parts = value.split(">")
+            if len(parts) < 2:
+                continue
+            agents = parts[1] if len(parts) == 3 else ""
+            molecules = _split_smiles(parts[0]) + _split_smiles(agents)
+            products = _split_smiles(parts[-1])
+            if not molecules or not products:
+                continue
+            yield RawReaction(molecules=molecules, products=products, source=source)
 
 
 def _is_smiles(value: object) -> bool:

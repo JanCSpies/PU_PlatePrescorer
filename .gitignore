@@ -15,7 +15,12 @@ datasets/raw/**
 datasets/processed/*.csv
 datasets/processed/*.parquet
 datasets/processed/*.npz
+datasets/processed/features/
 !datasets/processed/split_report.json
+
+# --- LICENSED-source-derived data (e.g. Pistachio): NEVER commit or publish. ---
+# Everything mined from a licensed source is written here and stays local-only.
+datasets/processed/private/
 
 # --- Literature PDFs: copyrighted, do not redistribute (notes in docs/ are ours) ---
 literature/**/*.pdf

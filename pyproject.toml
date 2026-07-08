@@ -44,6 +44,7 @@ models = [
 # Semiempirical QM descriptors (GFN2-xTB electronics per substrate) for the WS4 feature arm.
 # Install with:  uv sync --extra qm   (or: uv pip install tblite)
 qm = [
+    "morfeus-ml>=0.8.0",
     "tblite>=0.6",           # GFN2-xTB single-point charges / HOMO-LUMO / dipole via Python bindings
 ]
 
@@ -110,6 +111,7 @@ module = [
     "tabpfn.*",
     "chemprop.*",
     "tblite.*",
+    "morfeus.*",
 ]
 ignore_missing_imports = true
 

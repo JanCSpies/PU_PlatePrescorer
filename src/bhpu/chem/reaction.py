@@ -62,6 +62,63 @@ def build_cn_coupling_product(aryl_halide_smiles: str, amine_smiles: str) -> str
 
 
 @lru_cache(maxsize=200_000)
+def coupling_site_indices(
+    aryl_halide_smiles: str, amine_smiles: str
+) -> tuple[int, int | None, int] | None:
+    """Locate the reacting atoms of a BH C–N coupling via the reaction template.
+
+    Runs the same atom-mapped template used to build the product, then reads back which
+    aryl carbon (SMARTS map ``1``) and amine nitrogen (map ``2``) formed the new C–N bond
+    from RDKit's ``react_atom_idx`` provenance. Because it reuses the product template, the
+    returned sites are exactly the atoms whose coupling the DRFP/product represent, and the
+    polyhalide/poly-N–H ambiguity is resolved the same way as :func:`build_cn_coupling_product`
+    (the first sanitisable outcome).
+
+    Args:
+        aryl_halide_smiles: SMILES of the aryl (pseudo)halide electrophile.
+        amine_smiles: SMILES of the amine nucleophile.
+
+    Returns:
+        ``(aryl_carbon_idx, leaving_halide_idx, amine_nitrogen_idx)`` as atom indices on
+        freshly parsed ``aryl``/``amine`` molecules (``leaving_halide_idx`` is ``None`` for
+        a pseudohalide such as a triflate whose leaving atom is not a single halogen), or
+        ``None`` if the template does not apply or an input is unparsable.
+    """
+    aryl = Chem.MolFromSmiles(aryl_halide_smiles)
+    amine = Chem.MolFromSmiles(amine_smiles)
+    if aryl is None or amine is None:
+        return None
+    for outcome in _CN_COUPLING_RXN.RunReactants((aryl, amine)):
+        product = outcome[0]
+        try:
+            Chem.SanitizeMol(product)
+        except (Chem.AtomValenceException, Chem.KekulizeException, ValueError):
+            continue
+        carbon_idx: int | None = None
+        nitrogen_idx: int | None = None
+        for atom in product.GetAtoms():
+            mapno = atom.GetPropsAsDict().get("old_mapno")
+            if not atom.HasProp("react_atom_idx"):
+                continue
+            if mapno == 1:
+                carbon_idx = atom.GetIntProp("react_atom_idx")
+            elif mapno == 2:
+                nitrogen_idx = atom.GetIntProp("react_atom_idx")
+        if carbon_idx is None or nitrogen_idx is None:
+            continue
+        leaving_idx = next(
+            (
+                neighbour.GetIdx()
+                for neighbour in aryl.GetAtomWithIdx(carbon_idx).GetNeighbors()
+                if neighbour.GetSymbol() in ("F", "Cl", "Br", "I")
+            ),
+            None,
+        )
+        return carbon_idx, leaving_idx, nitrogen_idx
+    return None
+
+
+@lru_cache(maxsize=200_000)
 def enumerate_cn_coupling_products(aryl_halide_smiles: str, amine_smiles: str) -> frozenset[str]:
     """Enumerate *all* distinct BH C–N coupling products of an aryl halide and amine.
 
