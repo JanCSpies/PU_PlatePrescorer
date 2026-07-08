@@ -1,0 +1,32 @@
+# E3: all six PU methods x {substrate+condition, substrate-only} ECFP on merged P.
+# sbatch scripts_JSP/pubench_run.sbatch configs/pu_bench.e3.yaml
+
+data:
+  root: final_datasets
+  positives: merged
+
+seed: 0
+threshold_strategy: val_youden
+out_dir: artifacts/pubench/e3
+
+featurizers:
+  - name: ecfp
+    label: ecfp_subs_cond
+    params: { radius: 2, n_bits: 2048, use_conditions: true }
+  - name: ecfp
+    label: ecfp_subs_only
+    params: { radius: 2, n_bits: 2048, use_conditions: false }
+
+models:
+  - name: supervised
+    params: { iterations: 300, depth: 6 }
+  - name: spy
+    params: { iterations: 200, depth: 6, spy_fraction: 0.15 }
+  - name: bagging_pu
+    params: { n_estimators: 15, max_iter: 200 }
+  - name: elkan_noto              # nonlinear scaled classifier (HistGB)
+    params: { max_iter: 300 }
+  - name: nnpu
+    params: { prior: 0.32, epochs: 200, learning_rate: 0.05 }
+  - name: iw_pu
+    params: { prior: 0.32, epochs: 200, density_ratio: rulsif, project_dim: 64 }

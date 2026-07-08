@@ -91,4 +91,33 @@ Verified on the pubench-loaded splits (`inchikey` identities):
 - Training uses P + U only; thresholds/prior come from val (labelled, allowed); test labels are
   touched once, at final scoring.
 
+## E4 — feature × strong-model comparison (SLURM 55258, CPU) ⭐ new best
+- **Config:** `configs/pu_bench.e4.yaml`. Featurizers: ECFP subs-only, DRFP (aryl.amine>>product),
+  ECFP subs+cond. Models: supervised (CatBoost), spy, bagging_pu, elkan_noto (HistGB).
+- **Test ROC-AUC (top):**
+  | model | subs-only | drfp | subs+cond |
+  |---|---|---|---|
+  | **bagging_pu** | **0.689** | 0.549 | 0.323 |
+  | **elkan_noto** | **0.688** | 0.553 | 0.407 |
+  | supervised (CatBoost) | 0.594 | 0.562 | 0.322 |
+  | spy | 0.566 | 0.536 | 0.319 |
+  - val→test (subs-only): bagging 0.734→0.689, elkan 0.750→0.688, supervised 0.588→0.594 (modest gaps).
+- **Interpretation:**
+  1. **New best test ROC-AUC = 0.689** (bagging_pu / elkan_noto, substrate-only ECFP) — **+0.10 over
+     the naive supervised baseline (0.594)**. So the earlier "PU doesn't help" (E2) was really "the
+     *linear* nnPU doesn't help"; nonlinear PU reaches ~0.69.
+  2. **It's mostly a base-learner effect, not PU-specific.** elkan_noto's ranking == its HistGB
+     P-vs-U classifier (the ``c`` rescale doesn't change AUC), and bagging (0.689) ≈ single HistGB
+     (0.688). So **HistGradientBoosting (0.688) transfers far better than CatBoost (0.594) on the
+     identical P-vs-U task** — CatBoost's defaults overfit the literature-substrate shortcut; HistGB
+     regularises better. The PU-specific machinery (bagging over U) adds ≈0 here.
+  3. **DRFP transfers worse than substrate ECFP** (~0.55 vs ~0.59–0.69): the reaction-difference
+     fingerprint is near-constant across BH couplings, so it carries less transferable substrate info.
+  4. **Conditions-as-fingerprints crash again** (subs+cond ≤ 0.41 < subs-only for every model).
+- **Implication:** base-learner regularisation is a cheap lever (test the effect + tune it, E5). The
+  ceiling is still set by the P↔U/test domain gap (E-DIAG); descriptors remain the structural fix.
+- **Note:** E3 (same models incl. nnPU/IW-PU) was cancelled as redundant (E2 + E4 cover all its
+  combos) after the 10k-dim `bagging_pu` arm ran ~1 h/arm — HistGB bins every feature, so subs+cond
+  (10,243-dim) is slow; prefer subs-only (4,096-dim).
+
 <!-- New experiments appended below. -->
