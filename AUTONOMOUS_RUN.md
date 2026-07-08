@@ -80,11 +80,22 @@ Predict **feasibility of Buchwald–Hartwig C–N couplings on the JnJ (Neves) t
       `DomainAdaptedPULearner`. Transfer harness `eval/transfer.py`. **Numbers pending** (SLURM 55114).
 - [x] WS3 PU-theory note + PAYN cloned & RUNNING (`external/PAYN`, note `payn-baseline.md`).
       TODO: run PAYN on our literature→JnJ split as an explicit baseline row (needs ~60-line driver).
-- [ ] WS4 xtb features on SLURM; UMA via gpuma (stretch); QM-vs-fingerprint verdict.
-- [ ] Final: read 55114 → select arm on VAL → single TEST report + plate-uplift demo.
+- [x] WS4 xTB features DONE (`features/xtb.py`, `scripts/10`): 24,525 substrates in 45s. **Verdict:
+      xTB does NOT help** (ECFP 0.720 > ECFP⊕xTB 0.669 > xTB-only 0.614). UMA/gpuma not attempted
+      (heavy GPU env); site-specific QM untested.
+- [x] Final DONE: winner = IW-PU, ECFP, lit+ORD → **TEST ROC-AUC 0.720**, plate **2.3× uplift**
+      (`scripts/08`). ⚠ **Transductive** — inductive TEST 0.403 (see below). Full writeup `RESULTS.md`.
 
-## Key results so far (2026-07-08)
-- Mined C–N positive corpus: **35,929 unique substrate pairs** from ORD, JnJ-leak-free (0 exact
-  test pairs). Expands positives ~9× (4.1k literature → ~40k) with large substrate diversity.
-- Diagnosis: 0.52 is a **domain shortcut**, not prior shift → fix via transductive-U + CORAL + IW.
-- Running (SLURM 55114): DRFP/ECFP × {lit-only, lit+ORD} × {naive, CORAL, IW} × {PU, supervised}.
+## FINAL RESULTS (2026-07-08) — see RESULTS.md
+- **Better-PAYN = covariate-shift importance-weighted PU-bagging on ECFP, lit+ORD.**
+  TEST ROC-AUC **0.720** (VAL 0.773), beating PAYN-parity spy (0.61) & naive (0.60) by ~0.15,
+  literature-only, no JnJ labels. Plate demo: 96-well plate 100% feasible vs 43% random = **2.32×**.
+- Domain-shortcut AUC = 1.000 (diagnosis confirmed). DRFP catastrophic (condition-shortcut) → ECFP.
+  CORAL hurts on fingerprints (off by default). Data expansion (ORD) lifts VAL 0.669→0.773.
+- **⚠ TRANSDUCTIVE LIMIT:** inductive U (test substrates removed) → TEST **0.403** (VAL 0.752 holds).
+  The model pre-scores a KNOWN substrate library (the plate-design goal); does NOT generalize to
+  novel substrates. Reported honestly, not oversold.
+- Mined C–N corpus: **35,929 pairs** from ORD, JnJ-leak-free (0 exact test pairs, 2221 substrate
+  leaks dropped). Infra: capped CatBoost threads to SLURM alloc (was 10–100× oversubscribed).
+- Open next: inductive generalization (site-specific QM / UMA / substrate-aware DA); calibration;
+  Pd-only BH ablation; run upstream PAYN repo as an external cross-check.

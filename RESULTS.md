@@ -19,6 +19,14 @@ PAYN-parity baseline by **~0.15 AUC**. Winner (VAL-selected): **importance-weigh
 ECFP substrate features, trained on literature+ORD positives vs the transductive JnJ grid** —
 **VAL ROC-AUC 0.773 / TEST ROC-AUC 0.720, TEST AUPRC 0.720 (base rate 0.436)**.
 
+> **Scope of the 0.72 (read this).** The method is **transductive**: the unlabeled pool U is the
+> candidate substrate library you want to score, and the gain **requires the scored substrates'
+> structures to be present in U**. Removing the TEST substrates from U (a purely *inductive* test)
+> collapses TEST to **0.40** (below random) while VAL stays 0.75. So 0.72 is the honest number for
+> the **plate-design use case** — pre-ranking feasibility across a *known* aryl×amine matrix — which
+> is exactly this project's goal; it is **not** a claim of generalization to novel substrates. That
+> remains unsolved (§ Robustness).
+
 ## The diagnosis (why naive transfer fails)
 
 The **domain-shortcut discriminator AUC = 1.000** in every configuration: literature reactions and
@@ -96,14 +104,49 @@ Winner refit on literature+ORD (IW-only, no CORAL, 80 bags):
   bin) — *ranking* is strong (what plate design uses) but absolute probabilities need isotonic +
   prior-shift calibration (the natural next refinement; does not affect AUC/AUPRC/uplift).
 
+## Robustness: transductive vs inductive (`scripts/11`, SLURM 55125)
+
+The winning IW-PU model, ECFP, literature+ORD:
+
+| grid U | VAL ROC-AUC | **TEST ROC-AUC** |
+|---|---|---|
+| transductive (U = full JnJ grid) | 0.772 | **0.720** |
+| inductive (U excludes TEST substrates) | 0.752 | **0.403** |
+
+VAL is unchanged (VAL substrates stay in U) but **TEST collapses below random** when its substrates
+are removed from U. The gain is therefore **transductive** — the model ranks feasibility over a
+*known* substrate library but does not extrapolate to unseen substrates. This is the honest boundary
+of the method: it is a plate-design pre-scorer (the stated goal), not a novel-substrate predictor.
+
+## WS4: do GFN2-xTB quantum descriptors help? (`scripts/11`) — **no**
+
+Per-substrate GFN2-xTB electronics (HOMO/LUMO/gap/dipole/partial-charges; computed for all 24,525
+substrates in 45 s via `tblite`) added to or replacing ECFP, winning IW-PU config, transductive:
+
+| features | VAL ROC-AUC | TEST ROC-AUC |
+|---|---|---|
+| ECFP (substrate fp) | 0.772 | **0.720** |
+| ECFP ⊕ xTB | 0.744 | 0.669 |
+| xTB only (18 dims) | 0.626 | 0.614 |
+
+xTB-only carries real (if weaker) signal, but **adding xTB to ECFP *hurts*** — the 18 continuous
+global descriptors dilute the 4096-bit fingerprint. **Verdict: connectivity fingerprints suffice;
+global semiempirical descriptors do not add advantage for feasibility here.** (Caveat: these are
+whole-molecule descriptors; *site-specific* reactive-atom electronics — C–X electrophilicity, N
+nucleophilicity — or UMA/OMol25 MLIP embeddings via `gpuma` remain untested and are the natural
+next probe.)
+
 ## Honest caveats / next
 
-- **Transduction:** U contains the TEST substrate *structures* (unlabeled, no labels). This is the
-  intended plate-design setup, but a purely *inductive* robustness check (U excluding TEST substrates)
-  is a good next validation.
-- **BH specificity:** only 2,724/35,929 mined pairs have detectable Pd; the corpus is C–N-general.
-  A Pd-only ablation is a natural next step.
-- **Features:** substrate ECFP already gives 0.72; QM/xtb/UMA descriptors (WS4) are a candidate lift
-  but need environment setup — only worth it if this ceiling is limiting.
+- **The headline is transductive** (see Robustness). Inductive generalization to novel substrates is
+  the open problem — candidate directions: substrate-aware domain adaptation, site-specific QM
+  descriptors, or MLIP embeddings.
+- **Calibration:** PU-bagging scores are compressed (ECE 0.42); ranking is strong but probabilities
+  need isotonic + prior-shift calibration for interpretable thresholds.
+- **BH specificity:** only 2,724/35,929 mined pairs have detectable Pd; the corpus is C–N-general. A
+  Pd-only ablation is a natural next step.
+- **Compute note:** cap CatBoost `thread_count` to the SLURM allocation — unset, it grabs all node
+  cores and oversubscribes array tasks ~10–100× (fixed in `models/boosting.py`).
 - Reproduce: `sbatch slurm/transfer.sbatch` (arms) → `scripts/09_summarize_transfer.py` (table) →
-  `sbatch slurm/demo.sbatch` (final model + plate uplift). Artifacts in `artifacts/transfer_*.json`.
+  `sbatch slurm/demo.sbatch` (final model + plate uplift) → `scripts/10_precompute_xtb.py` +
+  `scripts/11_qm_and_inductive.py` (QM + inductive). Artifacts in `artifacts/`.

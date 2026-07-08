@@ -18,6 +18,43 @@
 
 ---
 
+## 2026-07-08 — RESULTS: better-PAYN transfer, xTB verdict, transductive limit — Florian's session (claude)
+
+**Full transfer sweep** (`scripts/06`+`09`, frozen protocol, VAL-selected → TEST reported once).
+Domain-shortcut discriminator AUC = **1.000** everywhere (literature vs JnJ trivially separable —
+the diagnosis, confirmed). Headline TEST ROC-AUC:
+
+| feature/data | spy (PAYN/SCAR) | naive PU | **IW-PU (better-PAYN)** |
+|---|---|---|---|
+| ECFP, lit-only | 0.554 | 0.561 | **0.710** |
+| ECFP, lit+ORD | 0.607 | 0.604 | **0.720** |
+
+- **Covariate-shift importance weighting is the win** (0.55→0.72), beating the PAYN-parity spy
+  baseline by ~0.15 AUC. **DRFP is catastrophic** (PU arms ~0.26 — its condition bits *are* the
+  domain shortcut → use substrate ECFP). **CORAL hurts** on 4096-d sparse fingerprints (honest
+  negative; disabled by default). Data expansion (ORD) lifts VAL 0.669→0.773.
+- **Final model + plate demo** (`scripts/08`): TEST ROC-AUC 0.722 / AUPRC 0.723; a model-ranked
+  96-well plate is **100 % feasible vs 43 % random = 2.32× uplift**. Scores uncalibrated (ECE 0.42) —
+  ranking strong, probabilities need calibration.
+
+**Two decisive follow-ups** (`scripts/11`, `10`):
+- **WS4 — xTB doesn't help.** GFN2-xTB electronics for all 24,525 substrates (45 s, `tblite`).
+  ECFP 0.720 > ECFP⊕xTB 0.669 > xTB-only 0.614. Global QM descriptors dilute the fingerprint;
+  connectivity features suffice. (Site-specific QM / UMA embeddings untested.)
+- **⚠ Transductive limit (the key honesty finding).** Removing TEST substrates from U (inductive)
+  collapses TEST **0.720 → 0.403** (below random) while VAL holds at 0.752. So the gain is
+  **transductive**: the model ranks feasibility over a *known* substrate library (= the plate-design
+  goal, legitimate) but does **not** generalize to novel substrates. Reported honestly in RESULTS.md;
+  not oversold.
+
+**Infra fix:** CatBoost was grabbing all 192 node cores per SLURM task → ~10–100× oversubscription
+(array tasks took 62–101 min!). Capped `thread_count` to `SLURM_CPUS_PER_TASK` → the QM+inductive
+sweep ran in ~4 min. See `models/boosting.py`.
+
+**Bottom line:** literature-only, no JnJ labels — a domain-debiased PU model pre-scores a known
+BH substrate matrix at ROC-AUC 0.72 (2.3× plate uplift), beating PAYN; novel-substrate
+generalization remains open. Full writeup in `RESULTS.md`.
+
 ## 2026-07-08 — WS1 mining done + WS2/WS3 domain-adaptation core + "better PAYN" — Florian's session (claude)
 
 **Context:** the research sub-agent's diagnosis reframed the whole problem (note
