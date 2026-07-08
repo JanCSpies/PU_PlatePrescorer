@@ -99,3 +99,17 @@ Predict **feasibility of Buchwald–Hartwig C–N couplings on the JnJ (Neves) t
   leaks dropped). Infra: capped CatBoost threads to SLURM alloc (was 10–100× oversubscribed).
 - Open next: inductive generalization (site-specific QM / UMA / substrate-aware DA); calibration;
   Pd-only BH ablation; run upstream PAYN repo as an external cross-check.
+
+## NEXT PHASE (2026-07-08, post-compact) — CONDITION-AWARE Pd-BH model
+
+Decided with Florian + Jan. Full spec: `docs/decisions/006-pd-bh-conditions.md`. In brief:
+1. **Pd-catalysed BH only** when mining (`detect(require_pd=True)` — DONE) — reject Cu-SNAr/Ni.
+2. **Mine substrates AND conditions, clean + unify** them — `bhpu.chem.conditions` (DONE, validated:
+   RuPhos-Pd-G4 ⇄ Pd+RuPhos → same ligand key; Cs2CO3=K2CO3=carbonate). `MinedReaction` now carries
+   ligand/base/solvent (DONE).
+3. **Kick-off (not yet run):** emit reaction-level (pair, condition) corpus; **re-mine** ORD + Pistachio
+   (private/) with `require_pd`; **condition-aware transfer** = substrate ECFP ⊕ unified condition
+   (ligand/base/solvent ECFP + metal), U spanning conditions. Overlap is favourable (ORD covers 47% of
+   JnJ ligands). Then **re-test descriptors WITH conditions** (WS5 negative was substrate-only).
+Status: canonicaliser + miner Pd-filter/condition-capture built, tested, committed. Heavy re-mine +
+re-eval pending (a good point to /compact before kicking off).

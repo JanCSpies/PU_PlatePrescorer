@@ -28,6 +28,7 @@ import pyarrow.parquet as pq
 from rdkit import Chem, RDLogger
 
 from bhpu.chem.canonical import canonical_smiles, inchikey, strip_and_canonicalise
+from bhpu.chem.conditions import condition_from_reagents
 from bhpu.chem.reaction import enumerate_cn_coupling_products
 
 RDLogger.DisableLog("rdApp.*")  # silence per-molecule parse warnings during bulk mining
@@ -69,6 +70,9 @@ class MinedReaction:
         raw_id: Source-native identifier.
         yield_value: Reported yield (percent), if any.
         has_pd: Whether a palladium species was present (BH-consistent conditions).
+        ligand_smiles: Canonical **unified** free-ligand SMILES (precatalyst⇄metal+ligand), if any.
+        base_smiles: Canonical base-anion SMILES, if identified.
+        solvent_smiles: Canonical solvent SMILES, if identified.
     """
 
     aryl_smiles: str
@@ -78,6 +82,9 @@ class MinedReaction:
     raw_id: str | None
     yield_value: float | None
     has_pd: bool
+    ligand_smiles: str | None = None
+    base_smiles: str | None = None
+    solvent_smiles: str | None = None
 
 
 def _clean_smiles(smiles: str) -> str | None:
@@ -104,15 +111,18 @@ def _clean_smiles(smiles: str) -> str | None:
 class BHCouplingDetector:
     """Detect and extract aryl C–N couplings from a bag of molecules + products."""
 
-    def detect(self, reaction: RawReaction) -> MinedReaction | None:
+    def detect(self, reaction: RawReaction, *, require_pd: bool = False) -> MinedReaction | None:
         """Return the extracted coupling for ``reaction``, or ``None`` if it is not one.
 
         Args:
             reaction: A raw reaction record.
+            require_pd: If ``True``, keep only **Pd-catalysed** couplings (reject Cu-catalysed
+                Ullmann/Chan–Lam, Ni, and metal-free SNAr) — the Buchwald–Hartwig design choice
+                (``docs/decisions/006``).
 
         Returns:
-            A :class:`MinedReaction` for the first (aryl halide, amine) pair whose enumerated
-            BH product matches a recorded product, else ``None``.
+            A :class:`MinedReaction` (with unified conditions attached) for the first (aryl halide,
+            amine) pair whose enumerated BH product matches a recorded product, else ``None``.
         """
         mols = [(s, Chem.MolFromSmiles(s)) for s in reaction.molecules]
         parsed = [(s, m) for s, m in mols if m is not None]
@@ -129,6 +139,8 @@ class BHCouplingDetector:
         if not product_keys:
             return None
         has_pd = any(s.count("Pd") > 0 or "[Pd" in s for s in reaction.molecules)
+        if require_pd and not has_pd:
+            return None  # not a Pd-catalysed Buchwald–Hartwig coupling
 
         for aryl_raw in aryl_halides:
             aryl = _clean_smiles(aryl_raw)
@@ -142,6 +154,10 @@ class BHCouplingDetector:
                     continue
                 for product in enumerate_cn_coupling_products(aryl, amine):
                     if inchikey(product) in product_keys:
+                        reagents = tuple(
+                            s for s in reaction.molecules if s not in (aryl_raw, amine_raw)
+                        )
+                        condition = condition_from_reagents(reagents)
                         return MinedReaction(
                             aryl_smiles=aryl,
                             amine_smiles=amine,
@@ -150,22 +166,29 @@ class BHCouplingDetector:
                             raw_id=reaction.raw_id,
                             yield_value=reaction.yield_value,
                             has_pd=has_pd,
+                            ligand_smiles=condition.ligand_smiles,
+                            base_smiles=condition.base_smiles,
+                            solvent_smiles=condition.solvent_smiles,
                         )
         return None
 
 
-def detect_batch(reactions: list[RawReaction]) -> tuple[int, list[MinedReaction]]:
+def detect_batch(
+    reactions: list[RawReaction], require_pd: bool = False
+) -> tuple[int, list[MinedReaction]]:
     """Detect couplings in a batch of reactions (a picklable worker for multiprocessing).
 
     Args:
         reactions: Raw reactions to scan.
+        require_pd: Keep only Pd-catalysed couplings (Buchwald–Hartwig; see ``detect``). Pass via
+            ``functools.partial(detect_batch, require_pd=True)`` for ``Pool.imap``.
 
     Returns:
         ``(n_scanned, matches)`` — the number examined and the confirmed couplings
         (typically ~10 % of the input for ORD).
     """
     detector = BHCouplingDetector()
-    matches = [m for r in reactions if (m := detector.detect(r)) is not None]
+    matches = [m for r in reactions if (m := detector.detect(r, require_pd=require_pd)) is not None]
     return len(reactions), matches
 
 

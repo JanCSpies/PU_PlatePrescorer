@@ -166,6 +166,13 @@ inductive gap needs a different lever (substrate-aware domain adaptation, or con
 features), not richer per-substrate descriptors. Descriptors were therefore **not** scaled beyond
 the subset (per the "no wasted compute on a negative" rule).
 
+> **Caveat (open — re-test with conditions).** This negative was measured **substrate-only**.
+> Substrate descriptors may carry electronic/steric information that is only *usable once the
+> reaction conditions are present* (a bulky ligand matters more for a hindered substrate, etc.). So
+> the descriptor verdict is **conditional on substrate-only learning**; it must be re-evaluated as
+> `substrate-descriptors ⊕ conditions` before treating descriptors as settled-useless
+> (`docs/decisions/006`).
+
 ## WS6: reaction conditions — the biggest untapped signal (`scripts/17`,`18`)
 
 We had been encoding **only the substrates** (aryl⊕amine ECFP) — no catalyst/ligand/base/solvent.

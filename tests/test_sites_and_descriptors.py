@@ -170,6 +170,41 @@ class TestConditionCanonicalization:
         )
 
 
+class TestPdFilterAndConditionMining:
+    """detect(require_pd=True) keeps only Pd couplings and attaches unified conditions."""
+
+    def _reaction(self, extra: tuple[str, ...]):
+        """A bromobenzene + morpholine coupling with the correct product plus ``extra`` reagents."""
+        from bhpu.chem.reaction import build_cn_coupling_product
+        from bhpu.data.mining import RawReaction
+
+        product = build_cn_coupling_product("Brc1ccccc1", "C1COCCN1")
+        return RawReaction(
+            molecules=("Brc1ccccc1", "C1COCCN1", *extra), products=(product,), source="t"
+        )
+
+    def test_pd_kept_with_conditions(self) -> None:
+        """A Pd/RuPhos/carbonate/dioxane reaction is kept with all condition slots filled."""
+        from bhpu.data.mining import BHCouplingDetector
+
+        ruphos = "CC(C)Oc1cccc(OC(C)C)c1-c1ccccc1P(C1CCCCC1)C1CCCCC1"
+        reaction = self._reaction(
+            ("CC(=O)O[Pd]OC(C)=O", ruphos, "O=C([O-])[O-].[Cs+].[Cs+]", "C1COCCO1")
+        )
+        mined = BHCouplingDetector().detect(reaction, require_pd=True)
+        assert mined is not None
+        assert mined.has_pd
+        assert mined.ligand_smiles and mined.base_smiles and mined.solvent_smiles
+
+    def test_copper_rejected_under_require_pd(self) -> None:
+        """A Cu-only (no Pd) coupling is rejected when require_pd is set."""
+        from bhpu.data.mining import BHCouplingDetector
+
+        reaction = self._reaction(("[Cu]I", "O=C([O-])[O-].[K+].[K+]"))
+        assert BHCouplingDetector().detect(reaction, require_pd=True) is None
+        assert BHCouplingDetector().detect(reaction, require_pd=False) is not None
+
+
 class TestPistachioReader:
     """The Pistachio reader parses atom-mapped reaction SMILES into raw reactions."""
 
