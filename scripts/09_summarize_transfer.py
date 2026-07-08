@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 ARTIFACTS_DIR = Path("artifacts")
 
 
-def _load_configs() -> list[dict[str, object]]:
+def _load_configs() -> list[dict[str, Any]]:
     """Load every transfer artifact, tagged by its filename stem."""
     configs = []
     for path in sorted(ARTIFACTS_DIR.glob("transfer_*.json")):
@@ -38,14 +39,12 @@ def main() -> None:
 
     for cfg in configs:
         summary = cfg["summary"]
-        assert isinstance(summary, dict)
         auc = summary.get("domain_auc_source_vs_grid", float("nan"))
         n_pos = summary.get("n_positives_total", "?")
         print(f"\n=== {cfg['_config']}  (positives={n_pos}, domain-shortcut AUC={auc:.3f}) ===")
         print(f"{'arm':<14} {'family':<11} {'VAL_AUC':>7} {'VAL_AP':>7} {'TE_AUC':>7} {'TE_AP':>7}")
         print("-" * 60)
         arms = cfg["arms"]
-        assert isinstance(arms, list)
         best = max(arms, key=lambda a: a["val"]["auprc"])
         for arm in sorted(arms, key=lambda a: a["val"]["auprc"], reverse=True):
             test = arm["test"] or {}
@@ -61,15 +60,18 @@ def main() -> None:
     # Headline comparisons across configs.
     print("\n=== headline comparisons (TEST ROC-AUC) ===")
     for cfg in configs:
-        arms = {a["name"]: a for a in cfg["arms"]}  # type: ignore[union-attr]
-        spy = arms.get("pu_spy", {}).get("test", {}) or {}
-        adapted = arms.get("pu_coral_iw", {}).get("test", {}) or {}
-        sup = arms.get("sup_coral", {}).get("test", {}) or {}
+        arm_map: dict[str, Any] = {a["name"]: a for a in cfg["arms"]}
+
+        def test_auc(name: str, table: dict[str, Any]) -> float:
+            arm = table.get(name) or {}
+            test = arm.get("test") or {}
+            return float(test.get("roc_auc", float("nan")))
+
         print(
-            f"  {cfg['_config']:<16} "
-            f"spy(PAYN)={spy.get('roc_auc', float('nan')):.3f}  "
-            f"pu_coral_iw={adapted.get('roc_auc', float('nan')):.3f}  "
-            f"sup_coral={sup.get('roc_auc', float('nan')):.3f}"
+            f"  {cfg['_config']:<20} "
+            f"spy(PAYN)={test_auc('pu_spy', arm_map):.3f}  "
+            f"pu_iw(better-PAYN)={test_auc('pu_iw', arm_map):.3f}  "
+            f"sup_coral={test_auc('sup_coral', arm_map):.3f}"
         )
 
 
