@@ -82,6 +82,20 @@ conditions; the grid U has 4 fixed general condition sets). **Lesson: use substr
   "U must live where the test lives". Legitimate for plate design (you know your candidate substrates)
   and label-free.
 
+## Final model + plate-design demo (`scripts/08`, SLURM 55122)
+
+Winner refit on literature+ORD (IW-only, no CORAL, 80 bags):
+
+- **JnJ TEST: ROC-AUC 0.722, AUPRC 0.723** (base rate 0.436); VAL ROC-AUC 0.771.
+- **Plate design (budget 96):** a model-ranked plate is **100 % feasible vs 43.1 % for a random
+  plate → 2.32× hit-rate uplift** (2.29× enrichment over the base rate). Demo plate written to
+  `artifacts/demo_plate.csv`; top picks are aryl chlorides × diverse amines.
+- **Effective sample size 6,627** of 40,072 positives — importance weighting concentrates on the
+  ~6.6k most JnJ-like literature positives (healthy, not collapsed).
+- **Calibration caveat:** raw PU-bagging scores are compressed low (ECE 0.42, no high-confidence
+  bin) — *ranking* is strong (what plate design uses) but absolute probabilities need isotonic +
+  prior-shift calibration (the natural next refinement; does not affect AUC/AUPRC/uplift).
+
 ## Honest caveats / next
 
 - **Transduction:** U contains the TEST substrate *structures* (unlabeled, no labels). This is the
