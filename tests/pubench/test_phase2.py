@@ -8,6 +8,8 @@ from sklearn.metrics import roc_auc_score
 from pubench.density_ratio import DENSITY_RATIOS, ULSIF, build_density_ratio
 from pubench.models import (
     MODELS,
+    BaggingPU,
+    ElkanNotoClassifier,
     ImportanceWeightedPU,
     LabeledArrays,
     SpyTwoStep,
@@ -76,6 +78,42 @@ def test_spy_extracts_reliable_negatives_and_separates() -> None:
     assert model.n_reliable_negatives_ > 0
     scores = model.predict_proba(test.X)
     assert roc_auc_score(test.y, scores) > 0.7
+
+
+def test_bagging_pu_separates() -> None:
+    """BaggingPU (ensemble over U subsamples) ranks the test set well above chance."""
+    assert "bagging_pu" in MODELS.names()
+    p, u, val, test = _synthetic_pu()
+    model = BaggingPU(n_estimators=8, max_iter=60, seed=0).fit(p, u, val=val)
+    assert isinstance(model, BaggingPU)
+    scores = model.predict_proba(test.X)
+    assert roc_auc_score(test.y, scores) > 0.8
+
+
+def test_elkan_noto_classifier_separates() -> None:
+    """The Elkan-Noto scaled classifier fits g/c and ranks the test set well above chance."""
+    assert "elkan_noto" in MODELS.names()
+    p, u, val, test = _synthetic_pu()
+    model = ElkanNotoClassifier(max_iter=80, seed=0).fit(p, u, val=val)
+    assert 0.0 < model.c_ <= 1.0
+    scores = model.predict_proba(test.X)
+    assert roc_auc_score(test.y, scores) > 0.8
+
+
+def test_iw_pu_weights_vary_when_densities_differ() -> None:
+    """When P spans two clusters but U covers only one, the ratio weights vary across P."""
+    rng = np.random.default_rng(0)
+    dim = 20
+    near = rng.normal(np.r_[2.0, np.zeros(dim - 1)], 1.0, (150, dim))  # in U's support
+    far = rng.normal(np.r_[-3.0, np.zeros(dim - 1)], 1.0, (150, dim))  # outside U's support
+    p = np.vstack([near, far])
+    u = rng.normal(np.r_[2.0, np.zeros(dim - 1)], 1.0, (400, dim))
+    val = LabeledArrays(np.vstack([near[:20], far[:20]]), np.r_[np.ones(20), np.zeros(20)].astype(int))
+    model = ImportanceWeightedPU(prior=0.5, epochs=20, project_dim=None, density_ratio="rulsif")
+    model.fit(p, u, val=val)
+    assert model._p_weights is not None
+    # points in U's support should get higher weight than the out-of-support cluster
+    assert model._p_weights[:150].mean() > model._p_weights[150:].mean()
 
 
 def test_iw_pu_declares_shift_handling() -> None:

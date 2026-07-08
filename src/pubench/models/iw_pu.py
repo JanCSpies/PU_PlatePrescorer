@@ -35,6 +35,9 @@ class ImportanceWeightedPU(NonNegativePU):
         Registered density-ratio estimator name (``"rulsif"`` recommended for stability).
     density_ratio_params:
         Extra constructor params for the density-ratio estimator.
+    project_dim:
+        If set, random-project features to this many dimensions before density-ratio estimation
+        (kernel density ratios degenerate in the raw 10k-dim sparse ECFP space). ``None`` = raw.
     weight_clip:
         ``(low, high)`` clip applied to the importance weights before self-normalisation.
     prior, prior_method, epochs, learning_rate, beta, gamma, l2, seed:
@@ -49,6 +52,7 @@ class ImportanceWeightedPU(NonNegativePU):
         *,
         density_ratio: str = "rulsif",
         density_ratio_params: dict[str, Any] | None = None,
+        project_dim: int | None = 64,
         weight_clip: tuple[float, float] = (0.0, 10.0),
         prior: float | None = None,
         prior_method: str = "elkan_noto",
@@ -71,18 +75,30 @@ class ImportanceWeightedPU(NonNegativePU):
         )
         self.density_ratio = density_ratio
         self.density_ratio_params = density_ratio_params or {}
+        self.project_dim = project_dim
         self.weight_clip = weight_clip
         self.ratio_: DensityRatioEstimator | None = None
 
     def fit(  # noqa: D102 (inherited)
         self, P: np.ndarray, U: np.ndarray, *, val: LabeledArrays | None = None
     ) -> ImportanceWeightedPU:
+        p_dr, u_dr = self._project(P, U)
         estimator = build_density_ratio(
             self.density_ratio, {"seed": self.seed, **self.density_ratio_params}
         )
-        estimator.fit(U, P)  # numerator = U (target), denominator = P (biased positives)
+        estimator.fit(u_dr, p_dr)  # numerator = U (target), denominator = P (biased positives)
         self.ratio_ = estimator
-        weights = np.clip(estimator.ratio(P), *self.weight_clip)
+        weights = np.clip(estimator.ratio(p_dr), *self.weight_clip)
         self._p_weights = weights if weights.sum() > 0 else None
         super().fit(P, U, val=val)
         return self
+
+    def _project(self, P: np.ndarray, U: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Random-project P and U to ``project_dim`` for the density ratio (raw if ``None``)."""
+        if self.project_dim is None or self.project_dim >= P.shape[1]:
+            return P, U
+        from sklearn.random_projection import GaussianRandomProjection
+
+        projector = GaussianRandomProjection(n_components=self.project_dim, random_state=self.seed)
+        projector.fit(np.vstack([P, U]))
+        return projector.transform(P), projector.transform(U)
