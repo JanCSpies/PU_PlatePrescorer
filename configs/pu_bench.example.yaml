@@ -1,0 +1,38 @@
+# Phase-1 PU-learning benchmark: substrate+condition ECFP x {supervised, nnPU}.
+# Run:  uv run python -m pubench.cli --config configs/pu_bench.example.yaml
+#   or: uv run python -c "from pubench.runner import Experiment, load_config; \
+#         Experiment(load_config('configs/pu_bench.example.yaml')).run()"
+
+data:
+  root: final_datasets          # dir with test/unlabeled_grid/private/positives_merged_bh parquet
+  positives: merged             # P = ORD+Pistachio merged corpus (licensed; stays in private/)
+
+seed: 0
+threshold_strategy: val_youden  # pick decision threshold by max (TPR - FPR) on the val split
+out_dir: artifacts/pubench/phase1
+
+featurizers:
+  - name: ecfp
+    label: ecfp_subs_cond       # substrate + ligand/base/solvent fingerprints + metal one-hot
+    params:
+      radius: 2
+      n_bits: 2048
+      use_conditions: true
+  - name: ecfp
+    label: ecfp_subs_only       # substrate-only diagnostic arm (ADR-005 baseline)
+    params:
+      radius: 2
+      n_bits: 2048
+      use_conditions: false
+
+models:
+  - name: supervised            # naive lower bound: treat U as negative
+    params:
+      iterations: 300
+      depth: 6
+      learning_rate: 0.05
+  - name: nnpu                   # Kiryo et al. non-negative PU risk (prior estimated via Elkan-Noto)
+    params:
+      epochs: 200
+      learning_rate: 0.05
+      prior_method: elkan_noto

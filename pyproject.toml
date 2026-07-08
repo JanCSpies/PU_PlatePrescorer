@@ -26,6 +26,7 @@ dependencies = [
     "tqdm>=4.66",             # Progress bars
     "rich>=13.9",             # Structured console output / logging
     "pydantic>=2.9",          # Typed, validated config objects
+    "pyyaml>=6.0",            # YAML experiment configs (pubench benchmarking pipeline)
 ]
 
 [project.optional-dependencies]
@@ -53,7 +54,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/bhpu"]
+packages = ["src/bhpu", "src/pubench"]
 
 # ---------------------------------------------------------------------------
 # Tooling configuration — enforces the project's coding standards:
@@ -89,6 +90,8 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["D103"]          # top-level script functions may omit docstrings
 "tests/*" = ["D", "ANN"]
+# PU models use the field's standard notation P (positives), U (unlabeled), X (features).
+"src/pubench/models/*.py" = ["N803"]
 
 [tool.mypy]
 python_version = "3.13"
@@ -112,6 +115,7 @@ module = [
     "chemprop.*",
     "tblite.*",
     "morfeus.*",
+    "yaml.*",
 ]
 ignore_missing_imports = true
 
