@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import os
 from typing import Self
 
 import numpy as np
 from catboost import CatBoostClassifier
 
 from bhpu.models.base import FeasibilityModel
+
+
+def _slurm_thread_count() -> int | None:
+    """Thread cap from the SLURM allocation (``SLURM_CPUS_PER_TASK``), else ``None``.
+
+    CatBoost otherwise spawns one thread per *node* core (e.g. 192), which oversubscribes a
+    smaller cpus-per-task allocation many-fold and thrashes — the cause of ~10-100x slowdowns
+    when several array tasks share a node. Capping to the allocation keeps runs fast and fair.
+    """
+    raw = os.environ.get("SLURM_CPUS_PER_TASK")
+    return int(raw) if raw and raw.isdigit() else None
 
 
 class CatBoostFeasibilityModel(FeasibilityModel):
@@ -51,6 +63,11 @@ class CatBoostFeasibilityModel(FeasibilityModel):
             "allow_writing_files": False,
             **extra_params,
         }
+        # Respect the SLURM cpus-per-task allocation unless the caller overrode thread_count.
+        if "thread_count" not in self.params:
+            thread_count = _slurm_thread_count()
+            if thread_count is not None:
+                self.params["thread_count"] = thread_count
         self._model = CatBoostClassifier(**self.params)
 
     def fit(
