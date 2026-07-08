@@ -129,6 +129,47 @@ class TestMorfeusFeaturizer:
         assert (np.abs(matrix).sum(axis=1) > 0).all()
 
 
+class TestConditionCanonicalization:
+    """The same catalytic system unifies whether written as a precatalyst or metal+ligand."""
+
+    #: RuPhos-Pd-G3 precatalyst vs. Pd(OAc)2 + free RuPhos.
+    _PRECATALYST = (
+        "CC(C)Oc1cccc(OC(C)C)c1-c1ccccc1P(C1CCCCC1)(C1CCCCC1)[Pd]1(OS(C)(=O)=O)c2ccccc2-c2ccccc2N1"
+    )
+    _FREE_RUPHOS = "CC(C)Oc1cccc(OC(C)C)c1-c1ccccc1P(C1CCCCC1)C1CCCCC1"
+
+    def test_precatalyst_and_free_ligand_unify(self) -> None:
+        """A precatalyst and its free ligand extract to the same ligand key."""
+        from bhpu.chem.canonical import inchikey
+        from bhpu.chem.conditions import extract_ligand
+
+        assert inchikey(extract_ligand(self._PRECATALYST)) == inchikey(
+            extract_ligand(self._FREE_RUPHOS)
+        )
+
+    def test_column_and_reagent_forms_agree(self) -> None:
+        """HTE (columns) and mined (reagent bag) forms give the same ligand/base/solvent keys."""
+        from bhpu.chem.conditions import condition_from_columns, condition_from_reagents
+
+        hte = condition_from_columns(self._PRECATALYST, "[Cs+].[Cs+].O=C([O-])[O-]", "C1COCCO1")
+        mined = condition_from_reagents(
+            ("CC(=O)O[Pd]OC(C)=O", self._FREE_RUPHOS, "O=C([O-])[O-].[K+].[K+]", "C1COCCO1")
+        )
+        assert hte.ligand_key == mined.ligand_key
+        assert hte.base_key == mined.base_key  # Cs2CO3 and K2CO3 both -> carbonate
+        assert hte.solvent_key == mined.solvent_key
+        assert hte.metals == mined.metals == frozenset({"Pd"})
+
+    def test_base_anion_unifies_counterions(self) -> None:
+        """Different carbonate counter-ions collapse to the same anion."""
+        from bhpu.chem.canonical import inchikey
+        from bhpu.chem.conditions import base_anion
+
+        assert inchikey(base_anion("[Cs+].[Cs+].O=C([O-])[O-]")) == inchikey(
+            base_anion("O=C([O-])[O-].[K+].[K+]")
+        )
+
+
 class TestPistachioReader:
     """The Pistachio reader parses atom-mapped reaction SMILES into raw reactions."""
 

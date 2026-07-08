@@ -18,6 +18,34 @@
 
 ---
 
+## 2026-07-08 — Condition unification: precatalyst ⇄ metal+ligand, and it bridges the gap — Florian's session (claude)
+
+**Context/Hypothesis:** Florian: (1) use conditions from ORD/Pistachio too (we discarded them),
+and (2) unify representations — RuPhos-Pd-G4 as one SMILES vs Pd + free RuPhos as two must map to
+the *same* features or nothing is learnable. Hypothesis: unified conditions + patent-mined
+conditions bridge the disjoint-condition problem that crashed condition transfer (WS6).
+
+**What I did:** `src/bhpu/chem/conditions.py` — `CanonicalCondition` decomposing any condition into
+**metal(s) / ligand / base / solvent**. Ligand recovered from a precatalyst by deleting the metal,
+neutralising the exposed P, keeping the largest phosphine fragment → canonical free-ligand SMILES.
+Base reduced to its **anion** (cations stripped). Works from HTE columns *and* from a mined reagent
+bag. Unit-tested.
+
+**Result (validated):**
+- **RuPhos-Pd-G3 precatalyst and free RuPhos → identical ligand key** (MXFYYFVVIIWKFE). HTE-column
+  and mined-reagent forms agree on ligand/base/solvent/metal. Cs₂CO₃ and K₂CO₃ → same carbonate.
+- Across JnJ+lit, **165 catalyst SMILES collapse to 66 ligand identities**.
+- **Pivotal overlap check** (extract conditions from a 400k-reaction ORD sample): JnJ uses 30 unique
+  ligands; ORD covers **14/30 (47%)**, and **73%** of ORD's ligand-bearing couplings use a ligand
+  JnJ *also* uses (RuPhos/XPhos/BrettPhos…).
+
+**Interpretation / decision:** The unification is real and **bridges the condition gap** — patents
+(ORD/Pistachio) use the same Buchwald ligands as JnJ, which HTE-only literature did not (8/81). So
+the WS6 crash was fixable exactly as Florian predicted: mine conditions from ORD/Pistachio + unify.
+**Next:** extend the miner to emit reaction-level (pair, condition) positives, re-mine ORD+Pistachio
+with unified conditions, and re-run the condition-aware transfer — now the P and JnJ condition
+spaces overlap, so condition features should finally *help* rather than act as a domain tag.
+
 ## 2026-07-08 — Conditions ARE the signal (+0.16 in-domain) + Pistachio helps — Florian's session (claude)
 
 **Context/Hypothesis:** Florian flagged that we encode **only substrates** (aryl⊕amine ECFP) and
