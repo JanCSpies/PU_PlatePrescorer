@@ -18,6 +18,104 @@
 
 ---
 
+## 2026-07-08 — Pistachio expansion (modular sources + merge), Cu/Ni reject, SLURM — Jan's session (claude)
+
+Extends `scripts_JSP/assemble_datasets.py` (ruff+mypy+pytest **12/12** ✅). Corpus numbers pending
+the SLURM run (job 55227); this entry records the code/design, a follow-up will add the counts.
+
+1. **Modular multi-source positives + final merge** (Jan's design ask). Each source is mined
+   **independently** into its own file, and combined only in a last step — so a consumer can use
+   ORD-only / Pistachio-only / merged without re-mining:
+   - `positives_ord_bh.parquet` (+`_relaxed`) — open → `final_datasets/`
+   - `positives_pistachio_bh.parquet` (+`_relaxed`) — **licensed** → `final_datasets/private/`
+   - `positives_merged_bh.parquet` (+`_relaxed`) — licensed → `private/`. `merge_positives` dedups
+     per `(pair,condition)` across sources (union `sources`, max yield/temp, summed records);
+     `--merge-only` recombines on-disk corpora without re-mining.
+   - Pistachio flows through the **same** detector/canonicaliser/leakage as ORD; conditions come out
+     unmapped + aligned (its agents block already pools solvent). Added `aryl_key`/`amine_key` cols.
+2. **Cu/Ni-additive rejection** (Jan). A Pd reaction that *also* contains a Cu/Ni metal is thrown
+   out by default (`reject_cu_ni=True`, counted as `n_dropped_cu_ni`; `--keep-cu-ni` to retain) so P
+   is cleanly Pd-only. (Seen in a Pistachio smoke: a few `Cu|Pd`/`Ni|Pd` mixed systems — now dropped.)
+3. **SLURM offload** `scripts_JSP/assemble_datasets.sbatch`: `--nice=1000000`, `CPU_Express`, 32
+   cores, forkserver pool (RDKit-safe), pinned math threads (per `docs/slurm.md`). Verified the
+   compute node sees the worktree `.venv`, `/mnt` Pistachio, and rdkit/pandas imports. The local
+   full run had been killed by a login-node resource limit — the cluster is the right venue.
+   **Licensing:** Pistachio-derived + merged outputs → gitignored `final_datasets/private/`; never publish.
+
+**Next:** record Pistachio/merged corpus sizes + Cu/Ni-drop count from job 55227; then transfer harness.
+
+## 2026-07-08 — Dataset assembly follow-ups: metal fix, relaxed P set, parallel scan — Jan's session (claude)
+
+Three refinements to `scripts_JSP/assemble_datasets.py` (all tested; ruff+mypy+pytest 9/9 ✅):
+
+1. **`metal` field fixed for ferrocene ligands — across ALL datasets.** dppf/dtbpf/josiphos/qphos
+   systems were reported as `Fe|Pd`, but the Fe is the *ferrocene backbone of the ligand*, not a
+   catalytic metal. Root cause is shared: **`bhpu.chem.conditions._metals_in` counts Fe (atomic 26)
+   as a metal**, and `extract_ligand` even *strips* that Fe out of the ligand SMILES (leaving a
+   mangled bis-norbornyl-phosphine fragment), so it can't be recovered there either. Fix: the reported
+   metal = metals **∩ {Pd, Cu, Ni}** (the metals that actually catalyse an aryl C–N coupling),
+   applied in the single `_condition_columns` projection shared by TEST/P/U — so all three agree.
+   Effect: **TEST 484 `Fe|Pd`→`Pd`, U 2309→`Pd`, P already clean**; now every row in every set is
+   `Pd`. **⚠️ Florian:** `condition_from_columns` still emits `Fe|Pd` for ferrocene catalysts —
+   JnJ *does* use 4 of them (dppf/dtbpf/josiphos/qphos-Pd), so consider the same restriction in the
+   canonicaliser, and note `extract_ligand` mangles ferrocene ligands.
+   - **Metal audit (Jan's question):** **no Cu- or Ni-catalysed reactions appear in any set** (0 rows
+     in TEST/P/U). P is Pd by `require_pd`; TEST/U are the JnJ Pd-BH plate. Only Pd is present anywhere.
+2. **Second, relaxed P set** (Jan's request). One ORD scan now feeds two corpora:
+   `positives_ord_bh.parquet` (**strict**, 211 rows — drops any reaction sharing a JnJ aryl/amine)
+   and `positives_ord_bh_relaxed.parquet` (**relaxed**, 224 rows — keeps single-substrate overlaps,
+   drops only **exact JnJ pairs** = 0 here, so no measured-outcome leak). Each variant is asserted
+   against its own leakage contract before writing; provenance JSON now has `positives_strict` +
+   `positives_relaxed`. The 13 extra relaxed rows share exactly one substrate with JnJ.
+3. **Parallel ORD scan** (`--jobs N`, `forkserver` pool per `docs/slurm.md`; RDKit-safe). Full 832k
+   pass ≈ **38 s at `--jobs 16`** (was ~4–6 min serial); parent parquet-feed is now the limiter, so
+   the bigger win will come on the larger Pistachio corpus. Serial (`--jobs 1`) remains the default.
+
+**Next unchanged:** Pistachio expansion to grow P (use `--jobs`/SLURM); wire `final_datasets/` into
+the transfer harness.
+
+## 2026-07-08 — Condition-aware dataset assembly (TEST / P / U in one unified schema) — Jan's session (claude)
+
+**Context/Hypothesis:** JSP branch owns dataset assembly (Florian takes descriptors). Before any
+transfer experiment we need the three datasets built *correctly and condition-aware*: TEST (JnJ),
+P (positive-only literature), U (unlabeled grid), all in **one** condition schema so conditions can
+transfer instead of acting as a domain tag (WS6). Open question going in: **does raw ORD even carry
+conditions?**
+
+**What I did:** New self-contained `scripts_JSP/assemble_datasets.py` (`DatasetAssembler`) +
+`tests/test_assemble_datasets_jsp.py` (5 tests, synthetic parquets). Reuses `src/bhpu` chemistry
+(BHCouplingDetector+`require_pd`, `condition_from_*` canonicaliser, `FrozenEvalProtocol`) — **no edits
+to shared `src/`** (avoids colliding with Florian's condition work). Writes to worktree `final_datasets/`.
+- **Answer: YES, ORD carries conditions.** `/mnt/.../orderly_forward_train.parquet` (832,809 rows) has
+  `agent_*` (cat/ligand/base), **`solvent_*`**, `temperature`, `yield_*` — all canonical SMILES.
+- **Bug found + fixed:** the shipped `iter_orderly` reads only reactants+`agent_*`, so it **drops
+  `solvent_*`** → mined conditions silently lost their solvent. My reader pools reactants+agents+
+  **solvents** into the molecule bag, so `condition_from_reagents` recovers the solvent.
+- P dedup is now per-`(pair, condition)` (signature = aryl/amine/ligand/base/solvent keys), not
+  pair-level. Unified condition columns (`metal`, `ligand_smiles/key`, `cond_base_smiles/key`,
+  `cond_solvent_smiles/key`) added to **all three** datasets via one projection helper.
+
+**Result (full ORD-forward pass, seed 1234, `require_pd=True`):**
+- **TEST** = 11,328 rows (val 2624 / test 1920 / 6784 mixed-discarded), 4432 positives, **100%
+  condition-resolved**; precatalyst→free-ligand extraction verified on the JnJ complexes.
+- **P** = **211 Pd-BH positives** (per pair,condition) from 225 detections / 832,809 scanned;
+  leakage-clean (**0 exact JnJ pair hits**, 13 substrate-leak drops removed). Coverage: solvent
+  172/211 (82%), ligand 150/211 (71% — only **16 distinct ligand keys**), base 61/211 but **26 of
+  those are `O`/water** → real base ≈ 35/211 (17%). **Ligand overlap with JnJ = 121/211 (57%).**
+  Metals: Pd (206), Fe|Pd (5 = dppf ferrocene, correct).
+- **U** = 52,736 rows = 6,592 unmeasured JnJ pairs × 8 sampled conditions (1,094 unique), same schema.
+- Gates: ruff ✅, mypy ✅, pytest 5/5 ✅.
+
+**Interpretation / decision:** Assembly is correct and conditions transfer-ready — **57% ORD↔JnJ
+ligand overlap** at full scale corroborates ADR-006's fixable-crash thesis (vs 8/81 for HTE-only lit).
+Two data-quality caveats for **Florian (owns conditions)**: (1) `base_anion` maps ~26 ORD bases to
+`O`/water — a canonicaliser edge worth a look; (2) P is **small (211)** because genuine Pd-BH is rare
+in ORD — expanding P with **Pistachio** (licensed → `datasets/processed/private/`) is the obvious lever.
+
+**Next:** (a) add a Pistachio reader arm to grow P; (b) hand `final_datasets/{test,positives_ord_bh,
+unlabeled_grid}` to the transfer harness (`scripts/17` generalised) with unified-condition ECFP first
+(ADR-006 order), descriptors as Florian's re-test; (c) flag the base-`O` issue to Florian.
+
 ## 2026-07-08 — Condition unification: precatalyst ⇄ metal+ligand, and it bridges the gap — Florian's session (claude)
 
 **Context/Hypothesis:** Florian: (1) use conditions from ORD/Pistachio too (we discarded them),

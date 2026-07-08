@@ -44,3 +44,9 @@ gpuma/
 
 # External upstream repos (their own git history, not tracked here)
 external/
+
+# Licensed (Pistachio-derived) assembled datasets — never publish
+final_datasets/private/
+
+# SLURM job logs (JSP)
+scripts_JSP/slurm_logs/
