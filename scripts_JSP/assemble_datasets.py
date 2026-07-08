@@ -64,6 +64,7 @@ import pyarrow.parquet as pq
 
 from bhpu.chem.canonical import inchikey, strip_and_canonicalise
 from bhpu.chem.conditions import CanonicalCondition, condition_from_columns
+from bhpu.chem.reaction import build_cn_coupling_product
 from bhpu.data import schema
 from bhpu.data.mining import BHCouplingDetector, RawReaction, iter_pistachio_csv
 from bhpu.eval.protocol import FrozenEvalProtocol
@@ -848,6 +849,7 @@ class DatasetAssembler:
             for amine in amines:
                 if (aryl, amine) in measured:
                     continue
+                product = build_cn_coupling_product(aryl, amine)  # persist so consumers need not re-derive
                 picks = rng.choice(len(unique_conditions), size=n_pick, replace=False, p=weights)
                 for idx in picks:
                     triple = unique_conditions.iloc[int(idx)]
@@ -864,6 +866,7 @@ class DatasetAssembler:
                         {
                             schema.ARYL_SMILES: aryl,
                             schema.AMINE_SMILES: amine,
+                            schema.PRODUCT_SMILES: product,
                             **unified,
                         }
                     )
