@@ -42,7 +42,20 @@ the SLURM run (job 55227); this entry records the code/design, a follow-up will 
    full run had been killed by a login-node resource limit — the cluster is the right venue.
    **Licensing:** Pistachio-derived + merged outputs → gitignored `final_datasets/private/`; never publish.
 
-**Next:** record Pistachio/merged corpus sizes + Cu/Ni-drop count from job 55227; then transfer harness.
+**Results (SLURM job 55227, `CPU_Express`, 32 cores, 3 min 47 s, MaxRSS ~95 GB):**
+- **P sizes (strict / relaxed):** ORD **211 / 224**; Pistachio **63,990 / 64,425**; **merged 64,061 / 64,499**
+  over 55,359 unique pairs. Merged `sources`: 63,850 Pistachio-only, **140 ORD∩Pistachio** (dedup ✅),
+  71 ORD-only. Merged `metal` = **100% Pd**.
+- **Cross-check:** my Pistachio scan detected 78,738 vs Florian's independent 78,780 — diff = **exactly 42**,
+  the Cu/Ni mixed-metal systems I now reject → confirms full-corpus processing, identical detection.
+  Also 532 JnJ-substrate rows leak-dropped; `assert_training_clean` passed.
+- **Quality:** ligand 90 % (231 distinct), solvent 88 % (15 distinct), **80 % share a JnJ ligand** (51,238)
+  — strong for transfer. **⚠️ base is the weak axis:** only 59 % coverage and `base_anion` quirks —
+  **4,058 rows = `O`/water** (hydroxide misclassified) and carbonate **split** across `O=C(O)O` (31,700)
+  vs `O=C([O-])[O-]` (107). **Florian:** worth tightening `base_anion`; downstream, don't over-weight base.
+
+**Next:** wire `final_datasets/` (P = merged or ORD-only; U; TEST) into the condition-aware transfer
+harness (`scripts/17` generalised), unified-ECFP first per ADR-006.
 
 ## 2026-07-08 — Dataset assembly follow-ups: metal fix, relaxed P set, parallel scan — Jan's session (claude)
 
