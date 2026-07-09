@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from pubench.data import BaseKeyFilter, Split
+
 
 @dataclass(frozen=True, slots=True)
 class DataConfig:
@@ -19,10 +21,14 @@ class DataConfig:
         Directory holding the assembled ``final_datasets`` parquet files.
     positives:
         Positives-corpus key (``"merged"`` or ``"ord"``).
+    base_filter:
+        Optional base-key allowlist restricting selected splits to an in-distribution condition
+        regime (e.g. carbonate-only). ``None`` loads every split whole.
     """
 
     root: Path
     positives: str = "merged"
+    base_filter: BaseKeyFilter | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +89,7 @@ class ExperimentConfig:
         data = DataConfig(
             root=Path(raw["data"]["root"]),
             positives=raw["data"].get("positives", "merged"),
+            base_filter=_base_filter(raw["data"].get("base_filter")),
         )
         return cls(
             data=data,
@@ -95,8 +102,14 @@ class ExperimentConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON/YAML-serialisable representation of the resolved config."""
+        data: dict[str, Any] = {"root": str(self.data.root), "positives": self.data.positives}
+        if self.data.base_filter is not None:
+            data["base_filter"] = {
+                "keys": sorted(self.data.base_filter.keys),
+                "apply_to": [s.value for s in Split if s in self.data.base_filter.apply_to],
+            }
         return {
-            "data": {"root": str(self.data.root), "positives": self.data.positives},
+            "data": data,
             "featurizers": [
                 {"name": c.name, "params": c.params, "label": c.label} for c in self.featurizers
             ],
@@ -111,6 +124,19 @@ def _component(raw: dict[str, Any]) -> ComponentSpec:
     """Parse one featurizer/model spec dict into a :class:`ComponentSpec`."""
     return ComponentSpec(
         name=raw["name"], params=dict(raw.get("params", {})), label=raw.get("label")
+    )
+
+
+def _base_filter(raw: dict[str, Any] | None) -> BaseKeyFilter | None:
+    """Parse a ``data.base_filter`` block into a :class:`BaseKeyFilter` (``None`` if absent).
+
+    The block has the form ``{keys: [<base-key>, ...], apply_to: ["P"|"U"|"val"|"test", ...]}``.
+    """
+    if raw is None:
+        return None
+    return BaseKeyFilter(
+        keys=frozenset(raw["keys"]),
+        apply_to=frozenset(Split(name) for name in raw["apply_to"]),
     )
 
 

@@ -39,7 +39,9 @@ class Experiment:
             One row per (model, featurizer, split) with assumption flags and all metrics.
         """
         dataset = FinalDatasetsAdapter(
-            root=self.config.data.root, positives=self.config.data.positives
+            root=self.config.data.root,
+            positives=self.config.data.positives,
+            base_filter=self.config.data.base_filter,
         ).load()
         _LOGGER.info(
             "loaded splits: %s",
@@ -58,10 +60,21 @@ class Experiment:
         return table
 
     def _featurize(self, dataset: PUDataset, spec: ComponentSpec) -> PUDataset:
-        """Fit the featurizer on P and transform every split."""
+        """Fit the featurizer on the P+U pool (label-free) and transform every split.
+
+        Data-dependent reducers (e.g. :class:`ReducedECFPFeaturizer`'s frequency filter / SVD) must
+        see the *unlabeled* target marginal U, not only the positives P, or they condense to P's
+        region and miss the JnJ substrate space. U carries no labels, so fitting on P+U introduces
+        no leakage and is consistent with the transductive protocol; stateless fingerprint
+        featurizers are unaffected.
+        """
         _LOGGER.info("featurizing with %s", spec.name)
         featurizer = build_featurizer(spec.name, spec.params)
-        featurizer.fit(dataset.records(Split.P))
+        fit_splits = [s for s in (Split.P, Split.U) if s in dataset.available_splits]
+        fit_records = pd.concat(
+            [dataset.records(s) for s in fit_splits], ignore_index=True, sort=False
+        )
+        featurizer.fit(fit_records)
         matrices = {
             split: featurizer.transform(dataset.records(split))
             for split in dataset.available_splits

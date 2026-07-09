@@ -1,0 +1,57 @@
+# E6: condensed substrate ECFP (SVD vs correlation) ± physical condition descriptors.
+# Hypotheses:
+#   (B) Condensing ECFP to a dense low-dim space lets density-ratio IW-PU work (vs its E2 collapse),
+#       and may curb overfitting to the domain shortcut.
+#   (A/C) Adding conditions as *physical descriptors* (shared space: ligand sterics/electronics,
+#       base pKa, solvent params) beats substrate-only in transfer, where condition *fingerprints*
+#       crashed (E1/E4). Condition axes have full support (every test ligand/base/solvent is in P+U).
+# Reference (not re-run here): raw 4096-d ecfp_subs_only under this exact protocol = 0.678 (sup_histgb)
+#   / 0.711 (sup_histgb_l2) from E5 — the number to beat. bagging_pu dropped (E4/E5: ~= single HistGB,
+#   and 25x HistGB on high-dim P+U is ~1h/arm). Correlation reduction is paired with a frequency
+#   pre-filter (min_freq) because |r|>0.8 alone barely condenses a 1.7%-dense binary fingerprint.
+# sbatch --partition=CPU scripts_JSP/pubench_run.sbatch configs/pu_bench.e6.yaml
+
+data:
+  root: final_datasets
+  positives: merged
+
+seed: 0
+threshold_strategy: val_youden
+out_dir: artifacts/pubench/e6
+
+featurizers:
+  - name: reduced_ecfp
+    label: svd256
+    params: { n_bits: 2048, use_conditions: false, method: svd, n_components: 256, standardize: true }
+  - name: reduced_ecfp
+    label: corr08
+    params: { n_bits: 2048, use_conditions: false, method: correlation, min_freq: 0.01, corr_threshold: 0.8 }
+  - name: condition_descriptors
+    label: cond_only
+    params: { ligand_cache: datasets/processed/features/ligand_descriptors.parquet }
+  - name: composite
+    label: svd256+cond
+    params:
+      components:
+        - { name: reduced_ecfp, params: { n_bits: 2048, use_conditions: false, method: svd, n_components: 256, standardize: true } }
+        - { name: condition_descriptors, params: { ligand_cache: datasets/processed/features/ligand_descriptors.parquet } }
+  - name: composite
+    label: corr08+cond
+    params:
+      components:
+        - { name: reduced_ecfp, params: { n_bits: 2048, use_conditions: false, method: correlation, min_freq: 0.01, corr_threshold: 0.8 } }
+        - { name: condition_descriptors, params: { ligand_cache: datasets/processed/features/ligand_descriptors.parquet } }
+
+models:
+  - name: supervised
+    label: sup_histgb_l2
+    params: { base: histgb, iterations: 400, learning_rate: 0.05, l2_regularization: 1.0 }
+  - name: elkan_noto
+    label: elkan
+    params: { max_iter: 300, learning_rate: 0.1 }
+  - name: iw_pu
+    label: iw_pu
+    params: { prior: 0.32, epochs: 200, density_ratio: rulsif, project_dim: 64 }
+  - name: spy
+    label: spy
+    params: { }
