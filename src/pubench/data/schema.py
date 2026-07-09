@@ -31,6 +31,13 @@ LIGAND_SMILES: Final[str] = "ligand_smiles"
 BASE_SMILES: Final[str] = "cond_base_smiles"
 SOLVENT_SMILES: Final[str] = "cond_solvent_smiles"
 
+# --- Canonical condition identity keys (InChIKey-14; collapse atom-map/charge variants) --
+#: These key columns index the physics-descriptor lookups (a ligand/base/solvent's descriptor is
+#: identity-defined), and are stable across the SMILES noise seen in the mined corpus.
+LIGAND_KEY: Final[str] = "ligand_key"
+BASE_KEY: Final[str] = "cond_base_key"
+SOLVENT_KEY: Final[str] = "cond_solvent_key"
+
 #: The condition SMILES columns fingerprinted by the ECFP featurizer.
 CONDITION_SMILES_COLUMNS: Final[tuple[str, str, str]] = (
     LIGAND_SMILES,
