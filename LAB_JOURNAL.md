@@ -18,6 +18,205 @@
 
 ---
 
+## 2026-07-09 — Two tracks reconciled: IW and regularization are SUBSTITUTES; simple HistGB+L2 wins — Jan's session (claude)
+
+**Context/Hypothesis:** Florian(human) asked (1) to run Florian(session)'s actual IW-PU-bagging
+(`bhpu.pu.DomainAdaptedPULearner`) on **our** `final_datasets` to see if it reproduces the RESULTS.md
+0.72, and (2) a **synthesis**: swap its CatBoost base for our regularized **HistGB+L2** — does
+covariate-shift importance weighting add anything once the base learner already fights the domain
+shortcut via regularization? Ran his exact code (IW + PU-bagging, no CORAL) on merged P / JnJ U, plus a
+HistGB+L2-backed `FeasibilityModel`, over raw ECFP (4096-d) and corr08 (982-d). SLURM 55341/42/56.
+
+**Result (JnJ TEST ROC-AUC, identical data):**
+| features | single HistGB+L2 (pubench) | HistGB-bag naive | HistGB-bag **+IW** | CatBoost-bag +IW (Florian) | CatBoost-bag naive |
+|---|---|---|---|---|---|
+| corr08 | **0.723** | 0.713 | 0.710 | 0.686 | 0.602 |
+| raw ecfp | 0.711 | 0.718 | 0.720 | 0.674 | 0.605 |
+
+**Interpretation / decision:**
+1. **IW adds nothing on top of HistGB+L2** (−0.003 corr08, +0.002 raw = noise, ESS ~10k healthy). But
+   IW helps CatBoost **hugely** (0.60→0.69). → **IW and L2 regularization are *substitutes*, not
+   complements**: both suppress the literature-vs-JnJ domain shortcut; CatBoost overfits it so IW is its
+   crutch; HistGB+L2 already controls it so IW is redundant. PU-bagging itself adds slight variance
+   (0.713 vs single 0.723 on corr08).
+2. **We did NOT reproduce his 0.72 with his method on our data** — his CatBoost IW-PU gives **0.674
+   (raw) / 0.686 (corr08)** here, ~0.04 below his reported 0.720. Same code → the gap is the **data
+   assembly** (his bhpu lit+ORD vs our merged ORD+Pistachio P + condition-spanning U; our ESS 10.6k vs
+   his 6.6k). **The two tracks' "0.72" were never on the same data** — flagged.
+3. **On a common footing the base learner dominates everything**: HistGB+L2 (~0.72) > CatBoost (0.60
+   naive / ~0.68 IW). Everything HistGB clusters at 0.71–0.723 (within test noise ±~0.02, n=1920).
+
+**Bottom line:** the honest headline model is deliberately **simple — a single L2-regularized
+HistGradientBoosting, treat-U-as-negative, on substrate ECFP (~0.72)**. Across *all* methods tried
+(spy/PAYN, nnPU, IW density-ratio, discriminator-IW + PU-bagging, CORAL, conditions, QM descriptors,
+propensity) **none beats it**; corr08 condensation matches it cheaper. Occam's razor is the result.
+
+**Next:** feature/method space is exhausted (all reconciled to one root cause). Package the substrate-
+level plate-triage demo (~0.72, 2.3× uplift) + this "why the simple model wins / why sophistication was
+unnecessary" narrative for submission; few-shot in-domain remains the only untried ceiling-breaker.
+
+## 2026-07-09 — E7 carbonate salvage: in-distribution conditions remove the crash but don't help — Jan's session (claude)
+
+**Context/Hypothesis:** Florian(human) — before abandoning JnJ, *test* ADR-007's OOD-conditions
+diagnosis directly instead of asserting it. Restrict JnJ to its **literature-common-condition subset**
+(carbonate base) so conditions are in-distribution, and see if condition modelling finally works. His
+ask: try **both** the normal P set **and** a carbonate-only P. (We first surveyed all on-disk HTE
+alternatives — `/mnt/datasets/HTE/*`, CHORISO, PUCDCO, PhotoCatDB: none is a substrate-diverse,
+common-condition, negatives-bearing BH set; **JnJ is the best public option**, its only flaw the
+adversarially-OOD conditions. So salvaging JnJ > switching datasets.)
+
+**What I did:** Built a **config-driven base filter** in pubench (`BaseKeyFilter{keys, apply_to}` on
+`DataConfig` → `FinalDatasetsAdapter`, +2 data-contract tests; ruff+mypy+**41 pubench tests** green). Decoded
+carbonate = `BVKZGUZCCUSVTD` (18.8 % test / 49.7 % P; P2-Et/HMDS = 0 rows in P). Ran 3 regimes ×
+{corr08, cond_only, corr08+cond} × `sup_histgb_l2` on SLURM (55348/49/50): **e7c** full control,
+**e7a** carbonate test w/ full P/U ("normal P"), **e7b** everything carbonate ("carbonate P").
+Carbonate test n=360 (128 pos), 95 % CI ≈ ±0.06.
+
+**Result (TEST ROC-AUC):**
+| featurizer | e7c full | e7a carb-test | e7b all-carb |
+|---|---|---|---|
+| corr08 (subs) | 0.723 | 0.698 | 0.695 |
+| corr08+cond | 0.340 | 0.570 | 0.558 |
+| cond_only | 0.321 | 0.497 | 0.506 |
+
+- **Control reproduces E6 exactly** (0.723 / 0.340 / 0.321) → filter is a clean no-op.
+- **The below-random crash was distributional & is removed in-distribution:** restricting the *test* to
+  carbonate lifts corr08+cond 0.34→0.57 and cond_only 0.32→0.50. (Full-test conditions anti-correlate
+  because JnJ's working bases P2-Et/HMDS are the ones literature never uses.)
+- **But conditions STILL don't help:** even all-carbonate, corr08+cond 0.558 **<** corr08 0.695 (gap 0.14
+  ≫ CI), cond_only ≈ random. Aligning training conditions (e7a→e7b) does nothing.
+- **Substrate model is regime-robust:** ~0.70 on carbonate ≈ 0.72 full; shrinking P 64k→32k / U 53k→9k
+  doesn't hurt it.
+
+**Interpretation / decision:** Sharpens **ADR-007** (updated), decision unchanged. The obstacle is not
+*only* condition-distribution coverage — a **positive-only P has no failed-condition examples**, so a
+P-vs-U contrast can't learn condition→feasibility even in-distribution (explains why the +0.16 in-domain
+signal never transfers). Condition modelling needs **in-domain negatives** (few-shot / HTE-with-negatives
+in the target conditions), not a matched distribution. **Substrate-level ~0.70–0.72 is the honest
+literature-only ceiling; the carbonate salvage's value is removing the embarrassing below-random result
+and pinning down *why* conditions fail.**
+
+**Next:** condition/feature engineering is exhausted (E6+E7+Stream D all negative for the same root
+cause). Real remaining levers: (a) **few-shot in-domain** (relaxes zero-JnJ-label purity — the only thing
+shown to move conditions), (b) package the honest substrate-level plate-triage demo (~0.72, 2.3× uplift)
+for the submission. Infra kept: `BaseKeyFilter` is reusable for any condition-subset study.
+
+## 2026-07-09 — Stream D step 2: propensity reweighting (report-freq + ZINC availability) — NEGATIVE — Jan's session (claude)
+
+**Context/Hypothesis:** Step 1 said report-freq is redundant *as a feature* but might help *as a
+propensity weight* (SAR/beyond-SCAR: downweight popular-substrate positives to correct reporting bias
+and pull P toward JnJ's rarer regime). Also fold in a **price/availability** axis (Florian(human)'s ask).
+
+**What I did:** No real price catalogue is mounted (Enamine REAL = make-on-demand products, no price), so
+availability = **ZINC in-stock purchasability** (`scripts_JSP/compute_availability.py`, SLURM 55331:
+13.2M in-stock → **9.04M purchasable InChIKey-14 keys**). SAR reweighting probes (SLURM 55333/55334):
+positives weighted `w=1/e(x)`, `e` from report-freq and/or availability, corr08 HistGB+L2, vs 0.723.
+
+**Result (TEST ROC-AUC; baseline uniform = 0.723):**
+| scheme | report-freq | availability |
+|---|---|---|
+| propensity reweight `1/e` | 0.701 | 0.706 |
+| combined rf+avail reweight | — | 0.707 |
+| as appended feature | 0.715 | 0.726 (VAL 0.742→**0.713**) |
+
+- **All propensity reweightings HURT** (0.70 vs 0.72). As features both are redundant/noise (avail's
+  +0.003 test comes with a −0.03 val drop → val-selection rejects it).
+- **Diagnostics explain it:** availability coverage is *higher* for JnJ (aryl 75 % / amine 82 %) than
+  literature P (34 % / 60 %) — JnJ picks in-stock building blocks — a real covariate shift, but the
+  availability↔feasibility signal is weak/negative (Spearman amine **−0.205**, avail-only AUC 0.556).
+  Both axes are partial domain tags (P-vs-U AUC 0.72–0.81).
+
+**Interpretation / decision:** **Stream D is a documented negative.** Root cause (now explicit):
+classic **propensity/SAR assumes P and U are the same population**; ours are different (literature vs
+JnJ), so the reporting-bias correction has no purchase — it just reweights by a partial domain tag with
+weak feasibility signal. Same literature↔JnJ gap that capped every other lever. **~0.72 substrate-only
+(corr08) is the honest ceiling for pure literature→JnJ transfer.** Per ADR-007, only **few-shot
+in-domain** data breaks it. Infra kept (report_frequency, availability lookups) — reusable if we ever go
+few-shot or expand the corpus.
+
+**Next:** stop feature/propensity engineering (exhausted); either (a) accept 0.72 and move to
+packaging/plate-demo/write-up, or (b) prototype few-shot in-domain (relaxes zero-JnJ-label thesis).
+
+## 2026-07-09 — Stream D step 1: report-frequency is the first non-domain-tag signal (but redundant as a feature) — Jan's session (claude)
+
+**Context/Hypothesis:** Per **ADR-007**, conditions are a dead end (OOD from literature) and the goal
+is substrate-level feasibility triage from literature only. Remaining lever = **Stream D (propensity)**:
+use a **non-chemical reportability** signal to model *"was this reported because it's feasible, or just
+because it's popular?"* (beyond-SCAR/SAR). Florian(human)'s framing: report frequency + price.
+
+**What I did:** `scripts_JSP/compute_report_frequency.py` (SLURM 55330) — counted each building block's
+occurrences as a **reactant across all reaction types** in ORDerly forward (832,809 rxns) → **530,086
+substrate keys** by InChIKey-14 (the same key as `aryl_key`/`amine_key`), so it's comparable for
+literature *and* JnJ. Then diagnostics + a probe (report-freq as features on the corr08 substrate model).
+
+**Result:**
+- **Coverage is low** (ORDerly forward is small): aryl 28–36 %, amine P 51 % but **test amine only 8.4 %**
+  — JnJ amines are obscure. Expanding to Pistachio/USPTO would raise coverage.
+- **Q1 — domain tag? Partly, but the LEAST of any feature yet.** P-vs-U discriminator on report-freq =
+  **0.81** (vs **1.0** for ECFP substrates *and* condition descriptors). First feature that is *not* a
+  perfect domain separator → genuinely more shift-robust.
+- **Q2 — feasibility signal? Yes, real and transferable.** On the held-out JnJ **test**, report-freq
+  *alone* predicts feasibility at **CV-AUC 0.62** (Spearman **+0.15** aryl / **+0.23** amine): common,
+  well-known building blocks react more reliably. A purely-popularity, non-chemical feature carrying a
+  cross-domain feasibility signal — exactly what everything chemical lacked.
+- **Probe — but it's REDUNDANT as a feature.** Appending report-freq to corr08 does **not** help:
+  TEST **0.723 → 0.715** (VAL 0.742 → 0.735). ECFP already encodes "common/well-behaved substrate", and
+  the 0.81 domain-tag component slightly hurts.
+
+**Interpretation / decision:** Report-freq is the first *shift-robust, feasibility-bearing* signal we've
+found — but its value is **not as a model feature** (structure subsumes it). Its proper role is as a
+**propensity weight**: SAR-reweight the positives by 1/propensity so the model learns feasibility rather
+than reporting popularity. That is the untested **step 2** and the actual beyond-SCAR experiment.
+
+**Next:** (a) step 2 — estimate propensity from report-freq (and price), reweight P, test transfer vs
+0.72; (b) raise coverage with Pistachio/USPTO reactant counts; (c) **price/availability** as a cleaner
+propensity signal — the **Enamine** building-block catalog is mounted (`/mnt/datasets/Enamine`).
+
+## 2026-07-09 — Featurization sweep (E6): corr-condensation ≥ raw, SVD worse, conditions crash again — Jan's session (claude)
+
+**Context/Hypothesis:** Florian(human) pushed featurization first (all models inherit it): (a) condense
+the long sparse ECFP, (b) encode conditions as *physical descriptors* not fingerprints, (c) see if
+importance-weighted PU (IW) starts working once features are dense. New plan in **`BATTLEPLAN.md`**;
+full log in `docs/pubench/EXPERIMENTS.md` (E6). Built during this session, gated (ruff+mypy+**43 tests**).
+
+**What I did (all in `src/pubench/`):**
+- `reduced_ecfp` featurizer (freq-filter → TruncatedSVD **or** |r|>0.8 correlation prune or none);
+  **runner now fits featurizers on P∪U** (label-free) so the reducer sees the target marginal.
+- `condition_descriptors` featurizer: **ligand** morfeus %V_bur/SASA at P + GFN2-xTB HOMO/LUMO/gap/
+  dipole/charges (reuses Florian's `bhpu.features.xtb`), + curated **13-base pKaH** & **18-solvent**
+  (ε/dipole/ET30/Kamlet-Taft) tables, median-imputed+standardised. `composite` featurizer stacks
+  reduced-ECFP ⊕ conditions. Ligand cache precomputed for **236 ligands, 0 failures/0 NaN**
+  (`scripts_JSP/precompute_ligand_descriptors.py`, on SLURM). **Condition support is complete:** all
+  30 test ligands / 8 bases / 6 solvents appear in P+U.
+- Fixed a real bug: `FinalDatasetsAdapter` dropped the `*_key` columns (SMILES-only allowlist) → added
+  them to `_CANONICAL_COLUMNS` (+ data-contract test).
+
+**Result (JnJ TEST ROC-AUC; reference raw-4096 ecfp = 0.711 from E5):**
+| model | svd256 | **corr08 (982-d)** | cond_only | svd256+cond | corr08+cond |
+|---|---|---|---|---|---|
+| **sup_histgb_l2** | 0.672 | **0.723** | 0.321 | 0.409 | 0.340 |
+| iw_pu | 0.663 | 0.401 | 0.294 | 0.290 | 0.285 |
+
+**Interpretation / decision:**
+1. **Correlation-condensation is the win; SVD is not.** `corr08` (drop rare bits + |r|>0.8) = **0.723**
+   at ~4× lower dim than raw (0.711), while dense `svd256` **loses** signal (0.672). Keeping informative
+   sparse bits > blending them into dense components. → `corr08` = new cheap substrate baseline.
+2. **IW-PU did NOT wake up** on condensed features (< HistGB everywhere; crashes on corr08). With
+   supports still disjoint even at 64-d (E-DIAG-2), density-ratio IW is structurally limited; the base
+   learner dominates. **Stream B largely refuted.**
+3. **⚠️ Conditions crash transfer even as physical descriptors** (cond_only 0.32; adding to substrate
+   *destroys* 0.72→0.34) — same crash as condition fingerprints. **Refutes the descriptor hypothesis
+   (ADR-005/006) for the cross-domain PU framing.** Cause is *distributional*: literature (P) and JnJ
+   (U/test) live in different condition regions, so in a P-vs-U contrast the condition axis is a domain
+   tag regardless of encoding. **Florian:** the +0.16 in-domain condition signal (WS6) is real but
+   needs a **two-part model** (substrate-PU ⊕ in-domain condition model) or condition-distribution
+   balancing — a raw P-vs-U contrast cannot use it.
+
+**Next:** (a) light `min_freq`/`corr_threshold` sweep on corr08; (b) pivot conditions to Stream D
+(propensity / condition-distribution reweighting) or a two-part model; (c) `BATTLEPLAN.md` streams
+updated. SLURM note: our cluster is usually empty — submitting even ~5-min jobs there (verified 7 idle
+CPU nodes today), per Florian(human)'s steer.
+
 ## 2026-07-08 — Pistachio expansion (modular sources + merge), Cu/Ni reject, SLURM — Jan's session (claude)
 
 Extends `scripts_JSP/assemble_datasets.py` (ruff+mypy+pytest **12/12** ✅). Corpus numbers pending

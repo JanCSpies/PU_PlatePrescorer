@@ -146,4 +146,146 @@ Verified on the pubench-loaded splits (`inchikey` identities):
   CatBoost baseline. Ceiling still set by the P↔JnJ domain gap (E-DIAG); descriptors remain the
   structural next lever.
 
+## E-DIAG-2 — does condensation shrink the P-vs-U domain gap? (local diagnostic) — **no**
+- **Setup:** P-vs-U HistGB discriminator (3-fold, 6k+6k substrate-only), raw ECFP vs SVD-condensed.
+- **Result:** discriminator AUC stays **1.000** at raw 4090-d, **0.9999** at SVD-64, **1.000** at
+  SVD-256. Condensation does **not** make literature and JnJ substrates overlap.
+- **Interpretation:** the "AUC=1.0 is a width artifact" hypothesis is **refuted for substrates** — the
+  two substrate sets are genuinely near-disjoint in Morgan space at every dimensionality. Condensation
+  is still worth it for *speed* and for making density-ratio numerically viable, but it cannot close
+  the domain gap. (Sets up E6's IW test.)
+
+## E6 — condensed substrate ECFP (SVD vs correlation) ± physical condition descriptors (SLURM 55323) ⭐
+- **Config:** `configs/pu_bench.e6.yaml`. Featurizers: `svd256` (TruncatedSVD→256-d), `corr08`
+  (freq-filter min_freq 0.01 + drop |r|>0.8 → **982-d**), `cond_only` (ligand morfeus %V_bur/SASA at
+  P + GFN2-xTB electronics + curated base-pKaH/solvent tables, 31-d), and the two composites
+  `svd256+cond` / `corr08+cond`. Models: `sup_histgb_l2`, `elkan`, `iw_pu`, `spy`. Featurizers fit on
+  **P∪U** (label-free). Reference: raw-4096 `ecfp_subs_only` = **0.711** (E5).
+- **TEST ROC-AUC:**
+  | model | svd256 | corr08 | cond_only | svd256+cond | corr08+cond |
+  |---|---|---|---|---|---|
+  | **sup_histgb_l2** | 0.672 | **0.723** | 0.321 | 0.409 | 0.340 |
+  | elkan | 0.672 | 0.704 | 0.323 | 0.421 | 0.352 |
+  | iw_pu | 0.663 | 0.401 | 0.294 | 0.290 | 0.285 |
+  | spy | 0.633 | 0.588 | 0.321 | 0.396 | 0.342 |
+  - corr08 sup_histgb_l2: TEST 0.723 / AUPRC 0.716 / VAL 0.742. svd256 sup_histgb_l2: TEST 0.672.
+- **Three findings:**
+  1. **Correlation-condensation ≥ raw ECFP; SVD < raw.** `corr08` (982-d, informative sparse bits
+     kept) reaches **0.723** — matches-to-slightly-beats raw 4096-d (0.711) at ~4× lower dimension and
+     far faster, while dense `svd256` **loses** signal (0.672). Keeping a filtered subset of bits
+     transfers better than a dense linear projection, which blends away the sparse substructure signal.
+     → **`corr08` is the new default substrate representation** (accuracy ≥ raw, cheaper). Strict
+     val-selection would pick `elkan`/`corr08` (VAL 0.759 → TEST 0.704); the regularised HistGB is the
+     principled a-priori pick → 0.723. Val remains a noisy selector (as in E5).
+  2. **IW-PU did NOT wake up on condensed features.** On every featurizer `iw_pu` < the strong HistGB
+     (svd256 0.663, and it *crashes* to 0.401 on corr08). **Refutes Stream B's premise** that
+     dimensionality was the blocker: with the supports still disjoint (E-DIAG-2), density-ratio IW is
+     structurally handicapped and the base learner dominates — consistent with E2/E4 ("it's a
+     base-learner effect, not PU machinery").
+  3. **Conditions crash transfer even as *physical descriptors*.** `cond_only` ≈ **0.32** (below
+     random) and adding conditions to a good substrate rep **destroys** it (corr08 0.723 → corr08+cond
+     0.340; svd256 0.672 → 0.409). This is the **same crash as condition *fingerprints*** (E1/E4,
+     ADR-005) — so the descriptor hypothesis (ADR-005/006) is **refuted for the cross-domain PU
+     setting**. Root cause is distributional, not representational: literature (P) and JnJ (U/test)
+     occupy different condition regions, so in the P-vs-U contrast the condition axis becomes a domain
+     tag whatever the encoding; below-random (0.32) is the anti-correlated-domain-tag signature (cf.
+     DRFP 0.26). The +0.16 in-domain condition signal (WS6) is real but **inaccessible to a P-vs-U
+     contrast** with disjoint condition distributions.
+- **Implications / next levers:**
+  - Substrate side is near its ceiling for this P: `corr08` is the cheap new baseline (~0.72); a light
+    sweep of `min_freq`/`corr_threshold` is the only substrate tuning left.
+  - To *use* conditions we need a different framing than raw P-vs-U: (a) balance the P and U condition
+    distributions (importance weighting / propensity on conditions so they stop being a domain tag),
+    or (b) a **two-part model** — literature-PU for substrate feasibility ⊕ an in-domain condition
+    model (the WS6 combined-model idea) — or (c) condition-conditional PU. This is where **Stream D
+    (propensity)** re-enters: reweighting toward JnJ-like conditions could de-confound the axis.
+- **Note:** first E6 attempt (55322) crashed with `KeyError: ligand_key` — the `FinalDatasetsAdapter`
+  projected splits to a SMILES-only column allowlist and dropped the identity keys the descriptor
+  featurizer looks up by; fixed by adding the `*_key` columns to `_CANONICAL_COLUMNS` (+ a data-contract
+  test assertion). A prior 55300 was cancelled (raw-4096 `bagging_pu` ~1h/arm; dropped from E6).
+
 <!-- New experiments appended below. -->
+
+## E7 — Carbonate salvage: does restricting to in-distribution conditions unlock condition modelling?
+
+**Configs:** `configs/pu_bench.e7{c,a,b}.yaml` · SLURM 55348/55349/55350 (~5 min each, CPU_Express).
+**Setup:** new **config-driven base filter** (`BaseKeyFilter{keys, apply_to}` on `DataConfig`, threaded
+through `FinalDatasetsAdapter`; +2 data-contract tests). Restrict splits to **carbonate**
+(`cond_base_key == BVKZGUZCCUSVTD` — decoded against ADR-007: 18.8 % of test, **49.7 % of P**; the one
+base regime shared with the literature corpus, whereas P2-Et/HMDS/silanolate are ~0 rows in P). Same
+featurizers as E6 (`corr08`, `cond_only`, `corr08+cond`) × `sup_histgb_l2`.
+
+**Three regimes (which splits are carbonate-restricted):**
+
+| arm | P | U | test | question |
+|---|---|---|---|---|
+| e7c control | full | full | full | reproduce E6 on this exact code path |
+| e7a test-restricted | full | full | **carb** | "normal P": is the current model better on the in-distribution-condition test? |
+| e7b fully-aligned | **carb** | **carb** | **carb** | "carbonate P": aligned regimes → do conditions finally help? |
+
+Carbonate test = **n=360 (128 pos / 232 neg)**, val n=448. **98 % of carbonate-test ligands are in
+carbonate-P** (vs the 8/81 catalyst gap on the full set); base now constant, solvent 57 % covered.
+
+**Result (TEST ROC-AUC):**
+
+| featurizer | e7c (full test) | e7a (carb test, full P/U) | e7b (carb test, carb P/U) |
+|---|---|---|---|
+| **corr08** (subs-only) | **0.723** | 0.698 | 0.695 |
+| corr08+**cond** | 0.340 | 0.570 | 0.558 |
+| cond_only | 0.321 | 0.497 | 0.506 |
+
+95 % CI on the carbonate test ≈ **±0.06** (Hanley–McNeil, n=360). So the corr08-vs-corr08+cond gap
+(**0.14**, paired on identical rows) is **real**; the 0.723→0.698 substrate change across the two test
+sets (**0.025**) is **within noise**.
+
+**Findings:**
+1. **Control reproduces E6 exactly** (corr08 0.723, corr08+cond 0.340, cond_only 0.321) → the filter
+   (`base_filter=None`) is a true no-op; the numbers below are apples-to-apples.
+2. **The *below-random* condition crash was distributional — and it goes away in-distribution.**
+   Restricting the **test** to carbonate lifts `corr08+cond` **0.340 → 0.570** and `cond_only`
+   **0.321 → 0.497**. On the full test JnJ's *working* conditions (P2-Et/HMDS) are the ones rarest in
+   literature, so "looks like a literature condition" **anti**-predicts feasibility (0.32, below
+   random). Remove those rows and the anti-correlation vanishes (conditions become ~random/neutral).
+   ADR-007's "it's distributional" diagnosis of the *sign flip* is confirmed.
+3. **But conditions still do NOT help — even fully in-distribution.** In e7b (everything carbonate)
+   `corr08+cond` **0.558 < corr08 0.695**, and `cond_only ≈ 0.51` (random). Aligning the *training*
+   regime (e7a→e7b) changes nothing (Δ ≤ 0.01). So the "conditions are useless in transfer" result is
+   **deeper than a domain-tag artifact**: the transferable condition→feasibility signal from a
+   positive-only P is essentially **absent**, because P contains only *working* condition/substrate
+   combos — a P-vs-U contrast has no failed-condition examples to learn from. The +0.16 **in-domain**
+   condition signal (WS6, 2026-07-08) needs in-domain **negatives**, which literature P cannot supply.
+4. **The substrate model is regime-robust (~0.70).** corr08 is 0.723 (full) ≈ 0.698 (carb test) ≈
+   0.695 (carb P/U) — the substrate feasibility signal doesn't depend on the exotic-condition rows, and
+   shrinking P 64k→32k / U 53k→9k to carbonate doesn't hurt it. Honest ceiling stays **~0.70–0.72**.
+
+**Decision:** confirms & sharpens **ADR-007** (see its E7 update). The carbonate salvage removes the
+*embarrassing* below-random condition crash but does **not** make conditions helpful — substrate-level
+feasibility remains the deliverable, and condition modelling still requires **in-domain negatives**
+(few-shot / an HTE with negatives in the target conditions), not just a matched condition distribution.
+**Next:** stop condition engineering; the only remaining condition lever is few-shot in-domain (ADR-007).
+
+## E8 — cross-track reconciliation: IW-PU-bagging vs regularization (SLURM 55341/42/56) ⭐
+- **Setup:** ran Florian(session)'s **actual** `bhpu.pu.DomainAdaptedPULearner` (covariate-shift
+  importance weights `d/(1−d)` + PU-bagging, no CORAL) on **our** `final_datasets`, and a **synthesis**
+  swapping its CatBoost base for a regularized **HistGB+L2** `FeasibilityModel`. Substrate ECFP, raw
+  (4096-d) + corr08 (982-d), IW on/off. Answers: does his method reproduce 0.72 on our data, and does
+  IW add anything on top of the strong regularized learner?
+- **TEST ROC-AUC (identical data):**
+  | features | single HistGB+L2 (E5/E6) | HistGB-bag naive | HistGB-bag **+IW** | CatBoost-bag +IW | CatBoost-bag naive |
+  |---|---|---|---|---|---|
+  | corr08 | **0.723** | 0.713 | 0.710 | 0.686 | 0.602 |
+  | raw ecfp | 0.711 | 0.718 | 0.720 | 0.674 | 0.605 |
+- **Findings:**
+  1. **IW adds nothing on HistGB+L2** (Δ = −0.003 corr08 / +0.002 raw = noise; ESS ~10k, healthy) but
+     helps CatBoost **+0.07–0.08**. → **importance weighting and L2 regularization are *substitutes***:
+     both suppress the domain shortcut; CatBoost overfits it (IW is its crutch), HistGB+L2 controls it
+     (IW redundant). PU-bagging adds slight variance vs the single model.
+  2. **Florian's method does NOT reproduce his 0.72 on our data** — CatBoost IW-PU = 0.674/0.686 here vs
+     his reported 0.720. Same code → the gap is the **data assembly** (his bhpu lit+ORD vs our merged
+     ORD+Pistachio + condition-spanning U). The two tracks' "0.72" were on different data.
+  3. **Base learner dominates:** HistGB+L2 (~0.72) > CatBoost (0.60 naive / ~0.68 IW). All HistGB
+     variants cluster 0.71–0.723 (test noise ±~0.02, n=1920).
+- **Bottom line:** the winning model is deliberately simple — **single L2-regularized HistGB,
+  treat-U-as-negative, substrate ECFP (~0.72)**; no PU method (spy/PAYN, nnPU, IW density-ratio,
+  discriminator-IW + bagging, CORAL) beats it. Occam's razor is the headline. See `LAB_JOURNAL.md`
+  (2026-07-09, "Two tracks reconciled").
