@@ -18,6 +18,50 @@
 
 ---
 
+## 2026-07-10 — Dataset switch RESULT: Chemlex amide transfer = 0.775 (raw ECFP), matches/beats the JnJ ceiling on a harder test — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** With P/U/overlap in hand and Florian(human)'s go-ahead, run the same
+`sup_histgb_l2` (histgb, 400 iters, lr 0.05, l2 1.0; corr08 + raw ECFP substrate-only) that gave
+~0.72/0.76 on JnJ, now on the two switched datasets, to see whether literature→Test feasibility
+transfer holds off JnJ.
+
+**What I did:** `scripts_JSP/run_dataset_switch.{py,sbatch}` (SLURM 55597, ~30 min). Chemlex: P =
+mined amide (258,645), U = 272×231 acid×amine matrix (62,832), VAL/TEST = shipped
+`Stratified_Split_Both_Unseen` (4,960 / 2,234), label = Conversion ≥ 20 %. HiTEA: P = merged_bh, U =
+33×28 (924), TEST = 36 substrate pairs collapsed to substrate-level feasibility (max yield ≥ 10 %).
+
+**Result (TEST ROC-AUC):**
+| dataset | corr08 | raw ECFP | VAL (raw) | n_test | base rate |
+|---|---|---|---|---|---|
+| **Chemlex amide** | 0.729 | **0.775** | 0.637 | 2,234 | 0.355 |
+| HiTEA BH | 0.698 | 0.698 | — | 36 | 0.694 |
+
+**Interpretation / decision:**
+1. **The switch works. Chemlex amide transfer = 0.775 (raw ECFP) / 0.729 (corr08)** — at/above the
+   JnJ substrate-only ceiling (~0.72), but on a **more honest test**: 8,068 diverse pairs with a
+   substrate-disjoint (both-unseen) split, and a **different reaction class** (amide, not BH). AP
+   0.60 at base rate 0.355 = real lift. So the literature→Test feasibility thesis generalises beyond
+   JnJ, and does so where JnJ couldn't (real substrate diversity, no condition confound).
+2. **raw ECFP > corr08 here (0.775 vs 0.729)** — *opposite* to JnJ (where corr08 ≥ raw). The
+   correlation prune (fit on P∪U) likely drops bits carrying the amine-axis signal, which is the
+   Chemlex domain-gap axis (only 26 % amine overlap). → corr08 is not a universal win; featurizer
+   choice is dataset-dependent. raw ECFP is the Chemlex default.
+3. **VAL (0.63) < TEST (0.78)** — the both-unseen "train" (our VAL) is a harder/different substrate
+   region than "test"; VAL-selection still picks raw>corr08 consistently with TEST, so no harm, but
+   flags that Chemlex's own splits are not iso-difficulty.
+4. **HiTEA = 0.698 on 36 pairs** — consistent with "BH model transfers to HiTEA substrates ≈ as well
+   as to JnJ", but n=36 (95 % CI ≈ ±0.18) is too small to be discriminative. Confirms the pipeline;
+   HiTEA stays a sanity check, not a headline.
+
+**Caveats:** single seed; transductive U (contains test substrates — plate-prescorer scope, same as
+JnJ, not a novel-substrate claim). Chemlex's both-unseen split does make test substrates unseen vs
+Chemlex-train, but our U still spans them.
+
+**Next:** (a) multi-seed CI on Chemlex 0.775/0.729; (b) inductive check (drop test substrates from U)
+to see if amide transfer is inductive or transductive like JnJ; (c) featurizer sweep on Chemlex
+(why raw>corr08 — amine-axis bits); (d) optional condition/propensity arms now that conditions are
+in-distribution. Artifacts: `artifacts/dataset_switch/transfer_results.json`.
+
 ## 2026-07-10 — Amide P mined (258k pairs) + real Chemlex overlap; HiTEA P reused — Jan's session (claude) [branch JSP-dataset-switch]
 
 **Context/Hypothesis:** Execute the sanctioned plan (both datasets): mine an amide P for Chemlex
