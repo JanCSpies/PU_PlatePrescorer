@@ -18,6 +18,52 @@
 
 ---
 
+## 2026-07-10 — Missing 2×2 cell filled: HistGB+L2 on Florian's data = 0.759 (his assembly is the *better* corpus) — Jan's session (claude)
+
+**Context/Hypothesis:** Florian(human) asked to close the loop on "why we couldn't reproduce his
+0.72". The reconciliation (below) ran *his* method on *our* data (→0.686). The mirror-image cell was
+never run: *our* method (single L2-regularized HistGB, treat-U-as-neg) on *his* data assembly. If it
+also lands ~0.72, both corpora hit the same ceiling under either learner; if lower, his IW-PU+his-data
+is a real combo.
+
+**What I did:** New thin script `scripts_JSP/reproduce_histgb_on_fb_data.py` (+ sbatch, SLURM 55588,
+CPU_Express, 6 min). It reuses the **identical** pubench `sup_histgb_l2` (histgb, max_iter 400, lr 0.05,
+l2 1.0) and `corr08`/raw-`ecfp` featurizers that scored 0.723/0.711 on our data — swapping in **only**
+Florian's data: P = his lit positives (`literature_clean` labels==1, 4,143) + his mined ORD corpus
+(`cn_corpus_ord`, 35,929) = **40,072**; U = his transductive JnJ grid (`unlabeled_grid`, 26,368);
+VAL/TEST = his JnJ split via the shared `FrozenEvalProtocol`. Sanity: P=40,072, val 2,624 / test 1,920,
+test base rate 0.436 — **all match his RESULTS.md exactly**, so it is his assembly, his split.
+
+**Result — the filled 2×2 (JnJ TEST ROC-AUC, single seed):**
+| model \ data | our `final_datasets` | **Florian's bhpu (lit+ORD, his U)** |
+|---|---|---|
+| **HistGB+L2 (ours), corr08** | 0.723 | **0.759** (VAL 0.769, AP 0.751) |
+| **HistGB+L2 (ours), raw ecfp** | 0.711 | **0.759** (VAL 0.756, AP 0.764) |
+| IW-PU CatBoost (his) | 0.686 / 0.674 | 0.720 |
+
+**Interpretation / decision:**
+1. **We didn't just reproduce 0.72 — we exceeded it. Our simple HistGB+L2 on his data = 0.759**, above
+   his own IW-PU-on-his-data (0.720) *and* above HistGB+L2-on-our-data (0.723). Both featurizers agree at
+   exactly 0.759 (independent-ish reductions → reassuring it's not a fluke of one featurization).
+2. **Read column-wise (same data, swap model):** HistGB+L2 > his IW-PU on *both* corpora (0.759 vs 0.720
+   on his; 0.723 vs 0.686 on ours; +~0.04 each). → the reconciliation's core finding **"simple base
+   learner wins"** holds and strengthens; his IW-PU was leaving performance on the table on his own data.
+3. **Read row-wise (same model, swap data):** his assembly beats ours by **+0.036 (corr08) / +0.048 (raw)**
+   under the identical model. → **his data assembly is genuinely the better corpus**, not our method being
+   deficient. The "couldn't reproduce 0.72" was 100% a data-assembly artifact — and his assembly is the
+   *stronger* one. Likely drivers (unconfirmed): ORD-only positives (vs our noisier ORD+Pistachio 64k) and
+   a tighter transductive JnJ-grid U (26k vs our condition-spanning 53k). Worth a diagnostic.
+4. **The "~0.72 substrate-only ceiling" (BATTLEPLAN/ADR-007) is really ~0.76 on the better assembly** —
+   still **transductive** (his U contains JnJ substrate structures; same plate-prescorer scope caveat as
+   his 0.72, not a novel-substrate claim), and single-seed (test n=1920, 95% CI ≈ ±0.025, so the +0.036
+   data lift is ~1.4 CI: strong-suggestive, confirm with a few seeds before headlining).
+
+**Next:** (a) 3–5-seed confirm of the 0.759 + our-data 0.723 to put an error bar on the +0.036 data lift;
+(b) quick ablation of *what* makes his assembly better (positives source: ORD-only vs +Pistachio; U size/
+tightness) — if it's the U, cheap to adopt; (c) if it holds, **switch the plate-triage demo onto his P/U
+assembly** (or merge the best of both) and update the headline from ~0.72 to ~0.76. Artifacts:
+`artifacts/pubench/fb_data_histgb/results.json`.
+
 ## 2026-07-09 — Two tracks reconciled: IW and regularization are SUBSTITUTES; simple HistGB+L2 wins — Jan's session (claude)
 
 **Context/Hypothesis:** Florian(human) asked (1) to run Florian(session)'s actual IW-PU-bagging
