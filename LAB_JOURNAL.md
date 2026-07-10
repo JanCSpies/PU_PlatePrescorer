@@ -18,6 +18,42 @@
 
 ---
 
+## 2026-07-10 — Amide P mined (258k pairs) + real Chemlex overlap; HiTEA P reused — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** Execute the sanctioned plan (both datasets): mine an amide P for Chemlex
+(product-template SMARTS), reuse merged_bh P for HiTEA, and report the *real* P↔Test overlap (the
+prior Chemlex number was an ORD-reactant proxy) before any training run.
+
+**What I did:** Built `pubench.mining.amide` (`AmideCouplingDetector` + `AmideMiner`, 6 tests) —
+acid+amine→amide product-template validated to reproduce **91%** of Chemlex's own products. Mined
+ORD+ORDerly and Pistachio in parallel (`scripts_JSP/mine_amide.{py,sbatch}`, SLURM 55592 array,
+~2 + ~6 min), dropping exact Chemlex (acid,amine) pairs (transductive leakage rule — shared
+*substrates* kept for U). Merged → `final_datasets/private/positives_amide_merged.parquet`
+(`assemble_amide_positives.py`).
+
+**Result:**
+- **Amide P: 258,645 unique pairs** (ORD 52,968 + Pistachio 255,607, ~50k overlap; 85,893 acids ×
+  81,929 amines) — 4× the BH corpus. **102 exact Chemlex pairs found & dropped** (99 ORD + 3 Pist);
+  post-drop P has **0** Chemlex pairs.
+- **Final Chemlex substrate overlap** (vs merged amide P): **acids 179/260 = 68.8%**, **amines
+  59/225 = 26.2%**, rows-with-both-substrates-in-P 1,939/11,669 = 16.6%. (ORD-only was 39%/16% →
+  Pistachio ~doubled it.) Conditions are near-constant (8 std coupling reagents + DMF) → **in
+  distribution**, unlike JnJ's exotic phosphazenes — the confound that sank every JnJ condition
+  experiment is absent by construction.
+- **HiTEA (BH), P = reused merged_bh:** aryl 14/33 = 42%, amine 8/28 = 29%, **0 exact-pair leakage**,
+  ligand 16/25 = **64%** (≫ JnJ's 8/81).
+
+**Interpretation / decision:** Both P/Test overlaps computed. **Chemlex's domain gap is the amine
+axis** (26% overlap — drug-like amines are rare literature amide nucleophiles even with Pistachio);
+acids are well covered (69%). No condition confound. The transductive U (built from the Chemlex
+acid×amine matrix) will contain every test substrate by construction, so the plate-prescorer premise
+holds regardless of the 26% P-overlap. HiTEA remains a thin-substrate condition screen (good ligand
+overlap, but 36 pairs). **Checkpoint reached — report to Florian(human) before building U + running.**
+
+**Next:** build U (Chemlex 272×231 acid×amine matrix; HiTEA 33×28) + eval splits (Chemlex ships a
+both-unseen split; HiTEA needs one), dedup, then run `sup_histgb_l2` (corr08 + raw ECFP) on both.
+Artifacts: `artifacts/dataset_switch/amide_overlap.json`, `*_provenance.json`.
+
 ## 2026-07-10 — Candidate replacement test sets profiled: Chemlex (amide) ≫ HiTEA (BH) for our framing — Jan's session (claude) [branch JSP-dataset-switch]
 
 **Context/Hypothesis:** On new branch `JSP-dataset-switch`, evaluate replacing JnJ (adversarially
