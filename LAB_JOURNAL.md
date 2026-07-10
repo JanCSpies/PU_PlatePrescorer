@@ -18,6 +18,48 @@
 
 ---
 
+## 2026-07-10 — Multi-seed CI + plate-prescoring PDF report (confusion matrices, operating curve) — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** Florian(human) — multi-seed the Chemlex numbers, then a PDF report with a
+thorough eval incl. confusion matrices; the pitch needs concrete TN/TP (failures skipped, hits
+caught) because the product is plate pre-scoring to avoid running dud wells.
+
+**What I did:** `scripts_JSP/run_multiseed_eval.py` (SLURM 55636, ~1.5 h): 5 seeds ×
+{transductive, inductive} × {raw ECFP, corr08}, featurize-once then refit HistGB per seed (the
+>200k-row bin-subsample is seeded → real variance). `scripts_JSP/make_report.py` → 4-page PDF
+(`artifacts/dataset_switch/plate_prescoring_report.pdf`): summary, multi-seed table + bootstrap CI,
+confusion matrices, ROC/PR, plate operating curve.
+
+**Result — multi-seed TEST (mean ± std over 5 seeds):**
+| regime | raw ECFP | corr08 |
+|---|---|---|
+| transductive | AUC **0.771 ± 0.003** / AP 0.593 | 0.726 ± 0.005 / 0.531 |
+| inductive | AUC **0.767 ± 0.002** / AP 0.621 | 0.745 ± 0.001 / 0.603 |
+Bootstrap 95% CI (test resampling): transductive 0.753–0.793, inductive 0.748–0.788. Inductive ≈
+transductive (Δ AUC −0.004; inductive AP is actually *higher*). The single-seed inductive result is
+confirmed with a tight CI.
+
+**Operating points (inductive / novel substrates, rank-based = run top-K of the plate):**
+| run top | hit rate | coverage | fails skipped | TP/FP/TN/FN |
+|---|---|---|---|---|
+| 25% | 61.8% | 43.5% | 85.2% | 345/213/1227/449 |
+| 35% | 59.6% | 58.7% | 78.1% | 466/316/1124/328 |
+| 50% | 55.0% | 77.3% | 65.1% | 614/503/937/180 |
+Base rate 35.5%. At top-50%: **1.5× hit-rate uplift, catch 77% of feasible, skip 65% of failures.**
+
+**Interpretation / decision:** Two things worth recording. (1) The result is now CI-backed: the
+inductive-≈-transductive claim survives 5 seeds + a test-set bootstrap. (2) **The val-Youden ABSOLUTE
+threshold is degenerate for the inductive model** (picks ~0.012 → predicts 99% positive): val and
+test occupy different substrate regions so an absolute probability threshold doesn't transfer.
+Resolution — and it's the *right* framing for the product: plate pre-scoring deploys as a **ranking**
+(run the top-K your budget allows), so the report uses **rank-based (budget) operating points**, which
+are non-degenerate and identical across regimes. Absolute-probability calibration across novel
+substrates is a separate, harder problem that the ranking use-case sidesteps.
+
+**Next:** report is submission-ready (PDF at `artifacts/dataset_switch/plate_prescoring_report.pdf`,
+shared disk). Optional: HiTEA inductive symmetry (n=36, weak); calibrated-threshold study if a
+hard classifier (not a ranking) is ever needed; fold into the write-up/demo.
+
 ## 2026-07-10 — BREAKTHROUGH: Chemlex amide transfer is INDUCTIVE (0.762, novel substrates) — the JnJ inductive wall is gone — Jan's session (claude) [branch JSP-dataset-switch]
 
 **Context/Hypothesis:** Florian(human) rightly pushed on the transductive caveat: our Chemlex U was

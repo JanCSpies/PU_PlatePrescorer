@@ -1,16 +1,18 @@
 """Render the Chemlex amide plate-prescoring evaluation to a multi-page PDF.
 
 Reads ``multiseed_metrics.json`` (per-seed + mean/std) and ``eval_arrays.npz`` (seed-averaged
-production raw-ECFP test/val scores) written by ``run_multiseed_eval.py`` and produces
-``artifacts/dataset_switch/plate_prescoring_report.pdf`` with:
+production raw-ECFP test/val scores) written by ``run_multiseed_eval.py``.
+
+Operating points are **rank-based (run the top-K of the plate)**, not an absolute-probability
+threshold: plate pre-scoring deploys as a *ranking* (you run the top-K wells your budget allows),
+and an absolute threshold does not transfer across substrate regions anyway. The report shows:
 
 1. executive summary framed around plate pre-scoring (run fewer, hit more);
-2. multi-seed ROC-AUC / AUPRC table (transductive vs inductive, both featurizers) + bootstrap CI;
-3. **confusion matrices** (transductive + inductive) at the val-selected Youden threshold, with the
-   operating-point metrics that sell the tool -- specificity (failures skipped), precision (hit
-   rate), recall (feasible caught), NPV;
+2. multi-seed ROC-AUC / AUPRC (transductive vs inductive, both featurizers) + bootstrap CI;
+3. **confusion matrices** at a top-50%-of-plate budget (transductive vs inductive) plus a table of
+   operating points (top 25 / 35 / 50 %) -- hit rate, coverage, failures skipped, TP/FP/TN/FN;
 4. ROC + precision-recall curves;
-5. the **plate operating curve** -- hit rate & recall vs fraction of plate run.
+5. the **plate operating curve** -- hit rate & coverage vs fraction of plate run.
 
 Run with:  uv run python -m scripts_JSP.make_report
 """
@@ -41,12 +43,8 @@ OUT_PDF = ART / "plate_prescoring_report.pdf"
 
 BLUE, ORANGE, GREY = "#2b6cb0", "#dd6b20", "#718096"
 GREEN, RED = "#2f855a", "#c53030"
-
-
-def _youden(y: np.ndarray, scores: np.ndarray) -> float:
-    """Youden-J-maximising threshold on a labelled split."""
-    fpr, tpr, thr = roc_curve(y, scores)
-    return float(thr[int(np.argmax(tpr - fpr))])
+HEADLINE_BUDGET = 0.50  # fraction of plate run for the headline confusion matrices
+BUDGETS = (0.25, 0.35, 0.50)  # operating points tabulated for the deployment (inductive) regime
 
 
 def _bootstrap_auc(y: np.ndarray, scores: np.ndarray, n: int = 2000) -> tuple[float, float]:
@@ -62,8 +60,13 @@ def _bootstrap_auc(y: np.ndarray, scores: np.ndarray, n: int = 2000) -> tuple[fl
     return float(np.percentile(aucs, 2.5)), float(np.percentile(aucs, 97.5))
 
 
-def _confusion(y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
-    """Confusion counts + plate operating-point metrics at a fixed threshold."""
+def _confusion_topk(y: np.ndarray, scores: np.ndarray, frac: float) -> dict[str, float]:
+    """Confusion counts + operating metrics when the top ``frac`` of the plate (by score) is run."""
+    n = len(y)
+    k = round(frac * n)
+    order = np.argsort(-scores)
+    pred = np.zeros(n, dtype=int)
+    pred[order[:k]] = 1
     tp = int(np.sum((pred == 1) & (y == 1)))
     fp = int(np.sum((pred == 1) & (y == 0)))
     tn = int(np.sum((pred == 0) & (y == 0)))
@@ -73,12 +76,42 @@ def _confusion(y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
         "fp": fp,
         "tn": tn,
         "fn": fn,
-        "precision": tp / (tp + fp) if tp + fp else float("nan"),
-        "recall": tp / (tp + fn) if tp + fn else float("nan"),
-        "specificity": tn / (tn + fp) if tn + fp else float("nan"),
+        "precision": tp / (tp + fp) if tp + fp else float("nan"),  # plate hit rate
+        "recall": tp / (tp + fn) if tp + fn else float("nan"),  # feasible caught
+        "specificity": tn / (tn + fp) if tn + fp else float("nan"),  # failures skipped
         "npv": tn / (tn + fn) if tn + fn else float("nan"),
-        "frac_run": (tp + fp) / len(y),
+        "frac_run": k / n,
     }
+
+
+def _operating_curve(
+    scores: np.ndarray, y: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (frac_run, cumulative hit-rate/precision, cumulative recall) sorted by score desc."""
+    order = np.argsort(-scores)
+    ys = y[order]
+    k = np.arange(1, len(ys) + 1)
+    hits = np.cumsum(ys)
+    return k / len(ys), hits / k, hits / ys.sum()
+
+
+def _load() -> dict[str, dict]:
+    """Load the seed-averaged test scores and derive per-regime evaluation blocks."""
+    arr = np.load(ARRAYS)
+    reg: dict[str, dict] = {}
+    for regime in ("transductive", "inductive"):
+        y = arr[f"{regime}_test_y"]
+        s = arr[f"{regime}_test_scores"]
+        reg[regime] = {
+            "y": y,
+            "s": s,
+            "auc": float(roc_auc_score(y, s)),
+            "ap": float(average_precision_score(y, s)),
+            "ci": _bootstrap_auc(y, s),
+            "base": float(y.mean()),
+            "cm": _confusion_topk(y, s, HEADLINE_BUDGET),
+        }
+    return reg
 
 
 def _text_page(pdf: PdfPages, title: str, lines: list[str]) -> None:
@@ -97,7 +130,7 @@ def _text_page(pdf: PdfPages, title: str, lines: list[str]) -> None:
 
 
 def _draw_confusion(ax: plt.Axes, cm: dict[str, float], title: str) -> None:
-    """Draw a 2x2 confusion heatmap (rows = actual, cols = predicted) with counts + rates."""
+    """Draw a 2x2 confusion heatmap (rows = actual, cols = run/skip) with counts + rates."""
     mat = np.array([[cm["tn"], cm["fp"]], [cm["fn"], cm["tp"]]], dtype=float)
     total = mat.sum()
     ax.imshow(mat / total, cmap="Blues", vmin=0, vmax=0.6)
@@ -111,45 +144,13 @@ def _draw_confusion(ax: plt.Axes, cm: dict[str, float], title: str) -> None:
             ax.text(j, i + 0.28, f"{mat[i, j] / total:.1%}", ha="center", va="center",
                     fontsize=9, color=GREY)
     ax.set_xticks([0, 1])
-    ax.set_xticklabels(["pred FAIL", "pred WORK"])
+    ax.set_xticklabels(["SKIP well", "RUN well"])
     ax.set_yticks([0, 1])
     ax.set_yticklabels(["actual FAIL", "actual WORK"])
-    ax.set_title(title, fontsize=12, weight="bold")
+    ax.set_title(title, fontsize=11.5, weight="bold")
     ax.set_xticks(np.arange(-0.5, 2, 1), minor=True)
     ax.set_yticks(np.arange(-0.5, 2, 1), minor=True)
     ax.grid(which="minor", color="white", linewidth=2)
-
-
-def _operating_curve(
-    scores: np.ndarray, y: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (frac_run, cumulative hit-rate/precision, cumulative recall) sorted by score desc."""
-    order = np.argsort(-scores)
-    ys = y[order]
-    k = np.arange(1, len(ys) + 1)
-    hits = np.cumsum(ys)
-    return k / len(ys), hits / k, hits / ys.sum()
-
-
-def _load() -> dict[str, dict]:
-    """Load metrics + scores and derive the per-regime evaluation blocks."""
-    arr = np.load(ARRAYS)
-    reg: dict[str, dict] = {}
-    for regime in ("transductive", "inductive"):
-        y = arr[f"{regime}_test_y"]
-        s = arr[f"{regime}_test_scores"]
-        thr = _youden(arr[f"{regime}_val_y"], arr[f"{regime}_val_scores"])
-        reg[regime] = {
-            "y": y,
-            "s": s,
-            "thr": thr,
-            "cm": _confusion(y, (s >= thr).astype(int)),
-            "auc": float(roc_auc_score(y, s)),
-            "ap": float(average_precision_score(y, s)),
-            "ci": _bootstrap_auc(y, s),
-            "base": float(y.mean()),
-        }
-    return reg
 
 
 def main() -> None:
@@ -169,6 +170,7 @@ def main() -> None:
 def _summary_page(pdf: PdfPages, reg: dict, metrics: dict, seeds: list) -> None:
     """Executive summary + multi-seed metric table."""
     t, i = reg["transductive"], reg["inductive"]
+    c50 = i["cm"]
     lines = [
         "§Purpose",
         "Pre-score a substrate plate (amide C-N coupling) so chemists run the wells likely to",
@@ -176,7 +178,7 @@ def _summary_page(pdf: PdfPages, reg: dict, metrics: dict, seeds: list) -> None:
         "Model: literature-only Positive-Unlabeled learning (258,645 amide positives mined from",
         "ORD+Pistachio; U = the candidate acid x amine matrix), one L2-regularised HistGB on",
         "substrate ECFP. Test = Chemlex wet-lab set (Nat Commun 2025), 2,234 held-out reactions,",
-        "feasible = conversion >= 20%.",
+        "feasible = conversion >= 20%. Deployment = rank the plate, run the top-K (budget-based).",
         "",
         f"§Headline (mean over {len(seeds)} seeds; raw-ECFP production model)",
         f"  Transductive (U includes the plate's substrates):  ROC-AUC {t['auc']:.3f}"
@@ -185,6 +187,11 @@ def _summary_page(pdf: PdfPages, reg: dict, metrics: dict, seeds: list) -> None:
         f"  [95% CI {i['ci'][0]:.3f}-{i['ci'][1]:.3f}]",
         "  => performance barely changes on NOVEL substrates: a genuine feasibility predictor, not",
         "     memorisation. (The JnJ/BH benchmark collapsed 0.72 -> 0.40 inductively.)",
+        "",
+        "§What it buys you (inductive, run top 50% of plate)",
+        f"  hit rate {c50['precision']:.0%} vs {i['base']:.0%} blind "
+        f"({c50['precision'] / i['base']:.1f}x)  |  catch {c50['recall']:.0%} of feasible  |  "
+        f"skip {c50['specificity']:.0%} of failures",
         "",
         "§Multi-seed table  (ROC-AUC / AUPRC, mean +/- std)",
     ]
@@ -199,20 +206,19 @@ def _summary_page(pdf: PdfPages, reg: dict, metrics: dict, seeds: list) -> None:
     lines += [
         "",
         "§How to read the rest",
-        "Next page: CONFUSION MATRICES at the operating threshold (chosen on validation, not the",
-        "test) -- how many failing reactions we correctly skip (TN) and how many working ones we",
-        "would run (TP). Then ROC/PR curves, then the PLATE OPERATING CURVE: hit rate and coverage",
-        "as a function of how much of the plate you choose to run.",
+        "Next: CONFUSION MATRICES at a top-50%-of-plate budget - how many failing reactions we",
+        "correctly SKIP (TN) and how many working ones we RUN (TP) - plus a table of budgets. Then",
+        "ROC/PR curves, then the PLATE OPERATING CURVE: hit rate & coverage vs how much you run.",
     ]
     _text_page(pdf, "Amide-coupling plate pre-scoring - evaluation report", lines)
 
 
 def _confusion_page(pdf: PdfPages, reg: dict) -> None:
-    """Confusion matrices + operating-point metric table for both regimes."""
+    """Confusion matrices at the headline budget + a budget-sweep table for deployment."""
     fig = plt.figure(figsize=(8.27, 11.69))
-    fig.suptitle("Confusion matrices at the validation-selected operating point",
+    fig.suptitle(f"Confusion matrices - run the top {HEADLINE_BUDGET:.0%} of the plate",
                  fontsize=14, weight="bold", color=BLUE, y=0.97)
-    gs = GridSpec(3, 2, figure=fig, height_ratios=[1.1, 1.1, 1.3], hspace=0.5, wspace=0.35,
+    gs = GridSpec(3, 2, figure=fig, height_ratios=[1.1, 1.1, 1.25], hspace=0.5, wspace=0.35,
                   top=0.9, bottom=0.07, left=0.12, right=0.9)
     for col, regime in enumerate(("transductive", "inductive")):
         r = reg[regime]
@@ -220,33 +226,38 @@ def _confusion_page(pdf: PdfPages, reg: dict) -> None:
                         f"{regime.capitalize()} (n={len(r['y'])})")
     ax = fig.add_subplot(gs[1, :])
     ax.axis("off")
-    rows = ["precision (plate HIT RATE)", "recall (feasible caught)",
-            "specificity (failures SKIPPED)", "npv (skipped truly fail)", "frac_run (plate run)"]
-    keys = ["precision", "recall", "specificity", "npv", "frac_run"]
-    cell = [[f"{reg['transductive']['cm'][k]:.1%}", f"{reg['inductive']['cm'][k]:.1%}"]
-            for k in keys]
-    tbl = ax.table(cellText=cell, rowLabels=rows, colLabels=["transductive", "inductive"],
-                   loc="center", cellLoc="center", bbox=[0.30, 0.0, 0.62, 1.0])
+    ind = reg["inductive"]
+    rows = [_confusion_topk(ind["y"], ind["s"], b) for b in BUDGETS]
+    cell = [
+        [f"{b:.0%}", f"{c['precision']:.1%}", f"{c['recall']:.1%}", f"{c['specificity']:.1%}",
+         f"{c['tp']}", f"{c['fp']}", f"{c['tn']}", f"{c['fn']}"]
+        for b, c in zip(BUDGETS, rows, strict=True)
+    ]
+    tbl = ax.table(
+        cellText=cell,
+        colLabels=["run", "hit rate", "coverage", "fails\nskipped", "TP", "FP", "TN", "FN"],
+        loc="center", cellLoc="center", bbox=[0.02, 0.0, 0.96, 0.92],
+    )
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(10.5)
-    tbl.scale(1, 1.5)
-    ax.set_title("Operating-point metrics (what the plate designer cares about)",
-                 fontsize=12, weight="bold", pad=14)
+    tbl.set_fontsize(10)
+    tbl.scale(1, 1.6)
+    ax.set_title("Operating points for the deployment (inductive) model - pick a budget",
+                 fontsize=11.5, weight="bold", pad=10)
     axt = fig.add_subplot(gs[2, :])
     axt.axis("off")
-    t = reg["inductive"]["cm"]
+    c = reg["inductive"]["cm"]
     base = reg["inductive"]["base"]
     txt = (
-        "Plain-language (inductive / novel-substrate regime):\n"
-        f"  - Of every 100 wells the model flags WORK, ~{t['precision'] * 100:.0f} truly work "
-        f"(vs {base * 100:.0f} picking blindly) - a {t['precision'] / base:.1f}x hit-rate uplift.\n"
-        f"  - It correctly SKIPS {t['specificity'] * 100:.0f}% of reactions that would have failed "
-        f"({t['tn']} of {t['tn'] + t['fp']}) - the wasted experiments avoided.\n"
-        f"  - Cost: it still catches {t['recall'] * 100:.0f}% of all feasible reactions "
-        f"(missing {t['fn']} hits here; move the dial below to trade recall vs precision).\n"
-        "  - Threshold fixed on VALIDATION data, never the test set."
+        "Plain-language (inductive / novel substrates; run top 50% = 1,117 of 2,234 wells):\n"
+        f"  - Of the wells we RUN, {c['precision']:.0%} actually work (vs {base:.0%} blind) "
+        f"- a {c['precision'] / base:.1f}x hit-rate uplift.\n"
+        f"  - We correctly SKIP {c['tn']} of {c['tn'] + c['fp']} failing reactions "
+        f"({c['specificity']:.0%}) - the wasted experiments avoided.\n"
+        f"  - We still capture {c['recall']:.0%} of all feasible reactions, missing "
+        f"{c['fn']} true hits at this budget.\n"
+        "  - Want purity over coverage? Run top 25% -> ~62% hit rate. It is a dial set by budget."
     )
-    axt.text(0.02, 0.95, txt, fontsize=10.5, va="top", linespacing=1.7)
+    axt.text(0.02, 0.95, txt, fontsize=10.3, va="top", linespacing=1.7)
     pdf.savefig(fig)
     plt.close(fig)
 
