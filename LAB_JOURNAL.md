@@ -18,6 +18,48 @@
 
 ---
 
+## 2026-07-10 — Candidate replacement test sets profiled: Chemlex (amide) ≫ HiTEA (BH) for our framing — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** On new branch `JSP-dataset-switch`, evaluate replacing JnJ (adversarially
+condition-OOD) with a public set that has diverse substrates + real measured negatives + natural
+conditions (`Future_datasets.md`). Florian(human)'s pipeline: build P by filtering ORD+Pistachio for
+the matching reaction class, U = substrate matrix of the test set, drop P rows exactly in Test. He
+asked for a substrate- & condition-space overlap analysis of P vs Test **before** any training run.
+
+**What I did:** Downloaded HiTEA (`emmaking-smith/HiTEA` `buchwald.csv`) and Chemlex (Zenodo 12920294)
+into `datasets/raw/` (gitignored). `scripts_JSP/analyze_candidate_datasets.py` profiles each and
+computes overlap by connectivity InChIKey-14. HiTEA (BH) → overlap vs the existing
+`positives_merged_bh` P (64k). Chemlex (amide, no P mined yet) → substrate-presence proxy vs the
+ORDerly reactant index (`report_frequency.parquet`, 530k keys).
+
+**Result:**
+| | HiTEA (BH) | Chemlex (amide) |
+|---|---|---|
+| rows / **substrate pairs** | 3,083 / **36** (33×28) | 11,669 / **8,068** (272×231) |
+| conditions | 25 ligand · **67 base** · 5 solv | 8 reagent · **1 solv** |
+| structure | **condition screen** (JnJ mirror-image) | **substrate matrix** |
+| pos-rate | 17% (≥10%) | 26% (≥20%) |
+| disjoint split | build it | **ships** (both-unseen 4,960/2,234) |
+| substrate overlap w/ P | aryl 14/33 (42%), amine 8/28 (29%) | acid 63% / amine 64% *in ORD reactants (proxy)* |
+| **exact pairs in P (leakage)** | **0/36** | pending amide mine |
+| ligand overlap w/ P | **16/25 (64%)** ≫ JnJ 8/81 | conditions ~constant → N/A |
+
+**Interpretation / decision:** **Chemlex is the better scientific fit.** 8,068 diverse pairs = a real
+substrate-generalization test (escapes JnJ's transductive-only trap); ~63% substrate coverage in ORD
+alone ⇒ smaller domain gap than JnJ; near-constant conditions remove the confound that sank every JnJ
+condition experiment; ships a substrate-disjoint split. Cost: an **amide P must be mined** (the bhpu
+miner is BH-only). **HiTEA is cheap but mismatched** — only 36 substrate pairs, its live axis is
+conditions (which we've shown don't transfer), and it re-imports JnJ's exotic phosphazene/HMDS bases
+(165/627 rows). Its 64% ligand overlap and 0 exact-pair leakage are nice but moot at 36 pairs.
+**Florian(human) chose to pursue both in parallel** (Chemlex = main; HiTEA = cheap BH sanity check),
+amide match via **product-template SMARTS** (mirror the BH detector). Next checkpoint: mine amide P,
+then report the *actual* Chemlex P↔Test overlap before the training run.
+
+**Next:** (a) build `AmideCouplingDetector` (acid+amine→amide product-template, analogue of the BH
+detector) + tests; (b) mine ORD+Pistachio → amide P (SLURM); (c) HiTEA: assemble reuse-merged_bh P /
+924-cell U / disjoint split; (d) report real Chemlex overlap; (e) run `sup_histgb_l2` on both.
+Artifacts: `artifacts/dataset_switch/overlap_analysis.json`.
+
 ## 2026-07-10 — Missing 2×2 cell filled: HistGB+L2 on Florian's data = 0.759 (his assembly is the *better* corpus) — Jan's session (claude)
 
 **Context/Hypothesis:** Florian(human) asked to close the loop on "why we couldn't reproduce his
