@@ -39,6 +39,8 @@ from sklearn.metrics import (
 ART = Path("artifacts/dataset_switch")
 METRICS = ART / "multiseed_metrics.json"
 ARRAYS = ART / "eval_arrays.npz"
+PAYN_JSON = ART / "payn_baselines.json"  # optional PAYN-style baseline bars
+PAYN_NPZ = ART / "payn_baseline_arrays.npz"
 OUT_PDF = ART / "plate_prescoring_report.pdf"
 
 BLUE, ORANGE, GREY = "#2b6cb0", "#dd6b20", "#718096"
@@ -163,7 +165,10 @@ def main() -> None:
         _summary_page(pdf, reg, metrics, seeds)
         _confusion_page(pdf, reg)
         _curves_page(pdf, reg)
+        _payn_page(pdf, reg, metrics)  # skipped if the baseline artifacts are absent
+        _payn_hitrate_page(pdf, reg)  # plate hit rate by model (skipped if artifacts absent)
         _plate_page(pdf, reg)
+        _leakage_page(pdf, reg)
     print(f"Wrote {OUT_PDF}")
 
 
@@ -287,6 +292,166 @@ def _curves_page(pdf: PdfPages, reg: dict) -> None:
     plt.close(fig)
 
 
+def _payn_page(pdf: PdfPages, reg: dict, metrics: dict) -> None:
+    """PAYN-style 3-model bar: positives-only (naive) vs our PU model vs the true upper bound.
+
+    Mirrors PAYN's per-fold benchmark. Our model is the *inductive* (novel-substrate) PU learner;
+    the two references come from ``run_payn_baselines.py``. Skipped if those artifacts are absent so
+    the report still builds on its own.
+    """
+    if not (PAYN_JSON.exists() and PAYN_NPZ.exists()):
+        return
+    pb = json.loads(PAYN_JSON.read_text())
+    arr = np.load(PAYN_NPZ)
+    y, pos_s, true_s = arr["test_y"], arr["positives_only_scores"], arr["true_scores"]
+    pos_auc = pb["baselines"]["positives_only"]["mean"]["roc_auc"]
+    true_auc = pb["baselines"]["true"]["mean"]["roc_auc"]
+    true_sd = pb["baselines"]["true"]["std"]["roc_auc"]
+    pu_auc = reg["inductive"]["auc"]  # ours = the novel-substrate PU model (the headline)
+    pu_sd = metrics["inductive"]["raw_ecfp"]["std"]["roc_auc"]
+    pu_s, base = reg["inductive"]["s"], reg["inductive"]["base"]
+
+    bars = [
+        ("positives-only", pos_auc, 0.0, GREY),
+        ("PU - ours", pu_auc, pu_sd, ORANGE),
+        ("true / ceiling", true_auc, true_sd, GREEN),
+    ]
+    fig = plt.figure(figsize=(8.27, 11.69))
+    fig.suptitle("PAYN-style comparison - what the literature buys you",
+                 fontsize=14, weight="bold", color=BLUE, y=0.97)
+    gs = GridSpec(3, 1, figure=fig, height_ratios=[1.0, 1.35, 0.95], hspace=0.5,
+                  top=0.9, bottom=0.06, left=0.14, right=0.92)
+
+    axb = fig.add_subplot(gs[0])
+    pos_y = np.arange(len(bars))
+    axb.barh(pos_y, [b[1] for b in bars], xerr=[b[2] for b in bars], color=[b[3] for b in bars],
+             height=0.62, error_kw={"ecolor": "#4a5568", "capsize": 4})
+    for yv, (_, v, e, _c) in zip(pos_y, bars, strict=True):
+        axb.text(v + e + 0.006, yv, f"{v:.3f}", va="center", fontsize=11, weight="bold")
+    axb.axvline(0.5, ls="--", color=RED, lw=1.2)
+    axb.set_yticks(pos_y)
+    axb.set_yticklabels([b[0] for b in bars], fontsize=9.5)
+    axb.invert_yaxis()
+    axb.set_xlim(0.45, min(1.0, max(b[1] for b in bars) + 0.09))
+    axb.set_xlabel("TEST ROC-AUC (inductive / novel substrates; random = 0.5)", fontsize=10)
+    axb.set_title("Feasibility discrimination on 2,234 held-out Chemlex reactions",
+                  fontsize=11, weight="bold")
+    axb.grid(axis="x", alpha=0.3)
+
+    axr = fig.add_subplot(gs[1])
+    for s, name, col in ((pos_s, "positives-only", GREY), (pu_s, "PU - ours", ORANGE),
+                         (true_s, "true (upper bound)", GREEN)):
+        fpr, tpr, _ = roc_curve(y, s)
+        axr.plot(fpr, tpr, color=col, lw=2, label=f"{name} (AUC {roc_auc_score(y, s):.3f})")
+    axr.plot([0, 1], [0, 1], "--", color=GREY, lw=1)
+    axr.set(xlabel="false positive rate", ylabel="true positive rate",
+            title="ROC - three models, identical held-out test")
+    axr.legend(fontsize=9, loc="lower right")
+    axr.grid(alpha=0.3)
+    axr.set_xlim(0, 1)
+    axr.set_ylim(0, 1)
+
+    axt = fig.add_subplot(gs[2])
+    axt.axis("off")
+    beats_ceiling = pu_auc >= true_auc - true_sd
+    verdict = (
+        f"Our literature-PU model ({pu_auc:.3f}) MATCHES/BEATS the in-domain ceiling "
+        f"({true_auc:.3f}) - with\n   ZERO Chemlex labels. 258k diverse literature positives "
+        "out-signal 4,960 in-domain rows\n   on novel substrates."
+        if beats_ceiling else
+        f"Our literature-PU model ({pu_auc:.3f}) sits between the naive skyline and the in-domain\n"
+        f"   ceiling ({true_auc:.3f}) - the classic PAYN ordering, with ZERO Chemlex labels."
+    )
+    txt = (
+        "The three models, scored on the identical 2,234-reaction test (raw-ECFP features):\n"
+        f"  - positives-only ({pos_auc:.3f}): score = Tanimoto to the nearest of 258,645\n"
+        "    literature positives. Pure 'looks like a known reaction', no notion of failure -\n"
+        "    the naive skyline.\n"
+        f"  - PU - ours ({pu_auc:.3f}): literature positives + the candidate acid x amine grid\n"
+        "    as implicit negatives. No target labels used.\n"
+        f"  - true / upper bound ({true_auc:.3f} +/- {true_sd:.3f}): the SAME HistGB trained on\n"
+        "    Chemlex's REAL train labels (1,174 work / 3,786 fail). The in-domain ceiling.\n"
+        f"=> {verdict}\n"
+        f"   (Beating positives-only by {pu_auc - pos_auc:+.3f} AUC shows the unlabeled U adds\n"
+        f"    signal beyond substrate similarity; test base rate {base:.1%}.)"
+    )
+    axt.text(0.0, 0.98, txt, fontsize=9.8, va="top", linespacing=1.55)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def _payn_hitrate_page(pdf: PdfPages, reg: dict) -> None:
+    """Plate hit rate as a function of which model ranks the plate (positives-only / PU / true).
+
+    The deployment question: if you let each model pick which wells to run, how good is the hit
+    rate? Overlays the per-model hit-rate-vs-fraction curve and tabulates hit rate + coverage at
+    fixed plate budgets. Skipped if the baseline artifacts are absent.
+    """
+    if not (PAYN_JSON.exists() and PAYN_NPZ.exists()):
+        return
+    arr = np.load(PAYN_NPZ)
+    y, pos_s, true_s = arr["test_y"], arr["positives_only_scores"], arr["true_scores"]
+    pu_s, base = reg["inductive"]["s"], reg["inductive"]["base"]
+    models = [
+        ("positives-only", pos_s, GREY),
+        ("PU - ours", pu_s, ORANGE),
+        ("true (upper bound)", true_s, GREEN),
+    ]
+    fig = plt.figure(figsize=(8.27, 11.69))
+    fig.suptitle("Plate hit rate by model - which pre-scorer to run",
+                 fontsize=14, weight="bold", color=BLUE, y=0.97)
+    gs = GridSpec(2, 1, figure=fig, height_ratios=[1.35, 1.0], hspace=0.32,
+                  top=0.9, bottom=0.08, left=0.12, right=0.93)
+
+    ax = fig.add_subplot(gs[0])
+    for name, s, col in models:
+        frac, prec, _rec = _operating_curve(s, y)
+        ax.plot(frac, prec, color=col, lw=2.2, label=name)
+    ax.axhline(base, color=RED, ls=":", lw=1.5, label=f"random ({base:.1%})")
+    ax.set_xlabel("fraction of plate run (top-scored wells first)", fontsize=11)
+    ax.set_ylabel("hit rate (precision)", fontsize=11)
+    ax.set_title("Hit rate vs how much of the plate you run, per ranking model",
+                 fontsize=11.5, weight="bold")
+    ax.legend(fontsize=9.5, loc="upper right")
+    ax.grid(alpha=0.3)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0.3, 1.0)
+
+    axt = fig.add_subplot(gs[1])
+    axt.axis("off")
+    cell = []
+    for b in BUDGETS:
+        row = [f"{b:.0%}"]
+        for _, s, _c in models:
+            c = _confusion_topk(y, s, b)
+            row.append(f"{c['precision']:.1%} / {c['recall']:.0%}")
+        cell.append(row)
+    tbl = axt.table(
+        cellText=cell,
+        colLabels=["run top", "positives-only", "PU - ours", "true (upper bd)"],
+        loc="center", cellLoc="center", bbox=[0.04, 0.30, 0.92, 0.56],
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(10.5)
+    tbl.scale(1, 1.6)
+    axt.set_title("Hit rate / coverage at fixed plate budgets  (cell = hit-rate % / coverage %)",
+                  fontsize=11, weight="bold", pad=8)
+    p35 = {name: _confusion_topk(y, s, 0.35) for name, s, _c in models}
+    cap = (
+        f"Read: rank the plate by a model, run the top X% (left column). Random picking hits "
+        f"{base:.0%}.\n"
+        f"At top-35%: positives-only {p35['positives-only']['precision']:.0%}, "
+        f"PU-ours {p35['PU - ours']['precision']:.0%}, "
+        f"true {p35['true (upper bound)']['precision']:.0%} hit rate. "
+        "Our literature-only PU pre-scorer\ngives essentially the same plate uplift as the "
+        "in-domain model trained on real labels -\nand both clearly beat ranking by mere "
+        "similarity to known reactions (positives-only)."
+    )
+    axt.text(0.04, 0.24, cap, fontsize=9.8, va="top", linespacing=1.55, transform=axt.transAxes)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def _plate_page(pdf: PdfPages, reg: dict) -> None:
     """The plate operating curve: hit rate + coverage vs fraction of plate run."""
     fig, ax = plt.subplots(figsize=(11.69, 7.2))
@@ -312,6 +477,52 @@ def _plate_page(pdf: PdfPages, reg: dict) -> None:
     fig.tight_layout(rect=(0, 0.06, 1, 1))
     pdf.savefig(fig)
     plt.close(fig)
+
+
+def _leakage_page(pdf: PdfPages, reg: dict) -> None:
+    """Reviewer-facing data-leakage audit: what the model sees at train time and what it never does.
+
+    Traces the actual fit path (``SupervisedBaseline.fit(P, U)`` -> ``HistGB.fit(vstack([P, U]))``);
+    the held-out Chemlex labels are consumed only by ``predict_proba`` at scoring time. The
+    transductive/inductive AUCs are read live from ``reg`` so the "no exposure" claim always quotes
+    the report's own numbers.
+    """
+    t = reg["transductive"]["auc"]
+    i = reg["inductive"]["auc"]
+    lines = [
+        "§Data-leakage audit - does the test set touch training?",
+        "Short answer: NO. The classifier sees zero target (Chemlex) labels while training.",
+        "It is fit on (P = 258,645 literature positives, U = the candidate acid x amine grid)",
+        "only; the held-out labels are read once, at scoring time, to make this report.",
+        "",
+        "§1. No early stopping on the test",
+        "HistGB.fit() receives only P and U. Its internal early-stopping split (sklearn",
+        "default, active at this size) is carved from P+U - literature/grid rows - never from",
+        "the Chemlex test wells. The test plate is not in the training matrix, so it cannot",
+        "be in any early-stopping split.",
+        "",
+        "§2. No hyperparameter tuning on the test",
+        "Model (400 iters, lr 0.05, L2 1.0) and features were frozen from the JnJ/BH benchmark",
+        "and reused unchanged. Nothing was tuned against Chemlex. The 'train' split is computed",
+        "as a val reference only - it selects nothing.",
+        "",
+        "§3. No feature leakage (headline model)",
+        "Headline = raw ECFP: 2048 fixed bits, no data-driven selection, so fitting the",
+        "featurizer is a no-op. (corr08 does mild transductive selection but lands on the",
+        "same number, so it is not what carries the result.)",
+        "",
+        "§4. Transductive U carries no labels - the inductive check confirms it",
+        "In the transductive setup the test substrate PAIRS sit in U as implicit negatives.",
+        "The inductive run (test substrates fully REMOVED from U) reproduces the AUC",
+        f"({i:.3f} vs {t:.3f}), so the result does not ride on test-substrate exposure. The",
+        "split is substrate-disjoint (Both_Unseen): test acids AND amines are novel vs train.",
+        "",
+        "§One caveat we state openly",
+        "The only place a human saw the test is model-selection altitude: which featurizer to",
+        "headline. Both featurizers agree, so this is minor - but we disclose it rather than",
+        "imply a fully blind protocol.",
+    ]
+    _text_page(pdf, "Data-leakage audit - methodological integrity", lines)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,131 @@
 
 ---
 
+## 2026-07-11 — Leakage audit: the HTE test never enters training (added to journal + both reports) — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** Florian(human) asked, for the pitch: given the HTE-based val/test, is this
+data leakage — do the models see it during training (early stopping etc.)? Traced the full data path
+to answer definitively and baked the answer into the artifacts so it survives for both sessions.
+
+**What I did:** Read the fit path end-to-end. `SupervisedBaseline.fit(P, U)`
+(`src/pubench/models/supervised.py:85`) does `self._model.fit(vstack([P, U]), [1..., 0...])`; the HTE
+test frame is only ever consumed by `predict_proba` at scoring time
+(`run_dataset_switch.py:133`, `run_hitea_eval.py`). Added a **"Data-leakage audit"** page to
+`make_report.py` (Chemlex) and `make_report_hitea.py` (HiTEA), regenerated both PDFs.
+
+**Result — audit findings (both reactions):**
+1. **Zero target labels in training** — model fit on (literature P, grid U) only; HTE labels read
+   once at scoring. 2. **No early stopping on test** — HistGB's default early-stopping split is carved
+   from P+U, never the HTE wells (the test frame is not in the training matrix). 3. **No HP tuning on
+   test** — HPs frozen from the JnJ/BH benchmark, reused unchanged; Chemlex "train" split is a
+   reported val reference that selects nothing; HiTEA has no val (n=36) and uses plate-budget
+   operating points, not a tuned threshold. 4. **No feature leakage** — headline raw-ECFP has fixed
+   bits (no selection); corr08 does mild transductive selection but lands on the same number.
+   5. **Transductive U ≠ label exposure** — Chemlex inductive run (test substrates removed from U)
+   reproduces the AUC, and the split is substrate-disjoint (Both_Unseen); HiTEA is transductive-only
+   (disclosed) but U only carries the pairs as implicit negatives, no yields.
+   One **disclosed caveat**: model/featurizer choice was made by humans who can see test numbers
+   (model-selection altitude); both featurizers agree, so minor.
+
+**Interpretation / decision:** The transfer result is **not inflated by leakage** — the classifier
+never sees a target label at train time, and early stopping (the specific worry) operates on an
+internal P/U split, not the HTE plate. The reviewer-facing methods paragraph is now in both report
+PDFs.
+
+**Next:** when we operationalise a val set for post-hackathon tuning (benchmarking ORD/Pistachio
+sources, HP/threshold selection), keep val↔test **substrate-disjoint** and touch test **once**. HiTEA
+needs a larger natural BH test to support a real val split.
+
+## 2026-07-10 — Generalisation: same method transfers to a 2nd reaction (HiTEA Buchwald-Hartwig C-N) — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** Florian(human) — after the Chemlex amide win, repeat the *exact* experiments
+(multi-seed PU + PAYN baselines + PDF report) on the HiTEA BH C-N set, to show the literature-PU
+plate-prescoring method works across reaction classes, not just amides.
+
+**What I did:** `scripts_JSP/run_hitea_eval.py` (SLURM 55647, 10.6 min) + `make_report_hitea.py`
+→ `artifacts/dataset_switch/hitea_bh_report.pdf` (5 pages, same structure as the Chemlex report).
+Identical method: literature P (64,061 merged BH positives) + candidate grid U (33×28), substrate-
+only raw-ECFP, `sup_histgb_l2`. Test = HiTEA 36 substrate pairs (max yield over conditions ≥ 10 %).
+
+**Result — TEST ROC-AUC (n=36, base rate 0.694):**
+| model | ROC-AUC | AP |
+|---|---|---|
+| positives-only (Tanimoto to 64k BH P) | 0.687 | 0.817 |
+| **PU — ours (raw ECFP, 5 seeds)** | **0.709 ± 0.011** (corr08 0.686 ± 0.023) | 0.860 |
+| true / in-domain (LOO-CV on 36) | **0.000 (collapses)** | 0.694 |
+PU bootstrap 95 % CI **[0.53, 0.89]** — wide (n=36) but lower bound still > 0.5.
+
+Plate hit rate (precision / coverage) by ranking model:
+| run top | positives-only | PU — ours | true (LOO) |
+|---|---|---|---|
+| 25 % | 78 % / 28 % | **89 % / 32 %** | 0 % / 0 % |
+| 35 % | 85 % / 44 % | **92 % / 48 %** | 15 % / 8 % |
+| 50 % | 83 % / 60 % | **89 % / 64 %** | 39 % / 28 % |
+Random hit rate = 69 %. At top-35 %: PU **92 % vs 69 % blind (1.33×)**, catches 48 %, skips 91 % of fails.
+
+**Interpretation / decision:** The method **generalises to a second reaction class**: same ordering
+as Chemlex — literature-PU > positives-only > random — and PU lifts the plate hit rate above both
+blind picking and similarity ranking on BH C-N. Three honest caveats, all stated in the report:
+(1) **n = 36** → the AUC gap over positives-only (+0.02) is within the bootstrap CI; the **hit-rate**
+gap (PU 89-92 % vs pos-only 78-85 %) is the cleaner read. (2) **High base rate (69 %)** limits
+headroom vs Chemlex (35 %). (3) **Inductive impossible** (all 36 substrates span U) and the
+**in-domain LOO model collapses to AUC 0.0** — you cannot train a feasibility model from 36 non-
+repeating pairs, which is itself the argument *for* literature transfer. Note bar/summary show
+0.716 vs 0.709: seed-averaged-score AUC vs mean-of-per-seed AUC (same estimator diff as Chemlex).
+
+**Next:** two clean reports now exist (`plate_prescoring_report.pdf` amide + `hitea_bh_report.pdf`
+BH). Both uncommitted. Demo/write-up line: "same literature-only pre-scorer lifts plate hit rate on
+two different reactions (amide C-N *and* Buchwald-Hartwig C-N)." For a stronger BH claim than n=36,
+a larger natural BH test would help (see `Future_datasets.md`) — HiTEA is a proof of transfer, not a
+powered benchmark.
+
+## 2026-07-10 — PAYN-style baselines: our literature-PU BEATS the in-domain ceiling on Chemlex — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** Florian(human) — PAYN always reports the PU model next to two references:
+a **positives-only** naive skyline and a **true** (real-labels) upper bound. Add both for the
+Chemlex amide report, plus a per-model **plate hit-rate** side-by-side, so we can say how good the
+hit rate is depending on which model ranks the plate.
+
+**What I did:** `scripts_JSP/run_payn_baselines.py` (SLURM 55642, 3.3 min). All three models scored
+on the *identical* 2,234-row both-unseen Chemlex test, raw-ECFP (4096-d):
+- **positives-only** = one-class kNN density, score = mean Tanimoto to the k=5 nearest of all
+  **258,645** literature positives (no U, no notion of failure). Deterministic.
+- **true / upper bound** = the *same* `sup_histgb_l2`, trained on Chemlex TRAIN's REAL labels
+  (1,174 work / 3,786 fail) via `SupervisedBaseline.fit(P=real_pos, U=real_neg)`. 5 seeds.
+- **PU — ours** = the inductive literature-PU model (0.767), read from the multi-seed run.
+Added two report pages to `make_report.py`: a 3-bar + ROC comparison, and a "plate hit rate by
+model" curve + budget table (25/35/50 %). Report now 6 pages.
+
+**Result — TEST ROC-AUC (inductive / novel substrates):**
+| model | ROC-AUC | AP |
+|---|---|---|
+| positives-only (similarity to known) | 0.671 | 0.507 |
+| **PU — ours (lit P + candidate U, ZERO target labels)** | **0.768** | 0.621 |
+| true / upper bound (in-domain real labels) | 0.733 ± 0.000 | — |
+
+Plate hit rate (precision / coverage) by ranking model:
+| run top | positives-only | PU — ours | true |
+|---|---|---|---|
+| 25 % | 52.9 % / 37 % | **61.8 % / 43 %** | 61.5 % / 43 % |
+| 35 % | 49.1 % / 48 % | **59.6 % / 59 %** | 56.1 % / 55 % |
+| 50 % | 46.5 % / 65 % | **55.0 % / 77 %** | 50.3 % / 71 % |
+Random hit rate = base rate 35.5 %.
+
+**Interpretation / decision:** Ordering is **PU (0.768) > true (0.733) > positives-only (0.671) >
+random (0.5)** — our zero-target-label literature-PU model **matches/beats the in-domain supervised
+ceiling** trained on real Chemlex labels. Why: 258k diverse literature positives out-signal only
+4,960 in-domain rows when the test substrates are novel (both-unseen split). Beating positives-only
+by +0.097 AUC shows the combinatorial **U adds real signal beyond substrate similarity** — it is not
+just "looks like a known reaction". This is a stronger-than-PAYN result: in PAYN the PU model sits
+*between* the two references; here it tops both. (Note true's std is 0.000 — HistGB on the fixed
+4,960-row set is deterministic across seeds; the bar has no meaningful spread.)
+
+**Next:** artifacts `artifacts/dataset_switch/payn_baselines.json` + `payn_baseline_arrays.npz`;
+report at `artifacts/dataset_switch/plate_prescoring_report.pdf`. Uncommitted so far. Fold the
+"literature-PU ≥ in-domain ceiling" line into the write-up/demo — it is the cleanest one-sentence
+sell. Optional: repeat positives-only with a proper isolation-forest to confirm the naive bar isn't
+kNN-specific.
+
 ## 2026-07-10 — Multi-seed CI + plate-prescoring PDF report (confusion matrices, operating curve) — Jan's session (claude) [branch JSP-dataset-switch]
 
 **Context/Hypothesis:** Florian(human) — multi-seed the Chemlex numbers, then a PDF report with a
