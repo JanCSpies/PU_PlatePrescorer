@@ -18,6 +18,52 @@
 
 ---
 
+## 2026-07-11 — Reaction×condition catalogue over ORD/Pistachio/USPTO/CHORISO/CJHIF (plate-selection tool) — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** Florian(human) — for the *prospective plate* project, cluster the big general
+reaction databases into (reaction class)→(commonish conditions) groups so a chemist can browse and
+pick which transformation + condition regime to run plates for. Then: how dependent is this on the
+**licensed Pistachio** set vs open data?
+
+**What I did:** New pkg `src/pubench/rxngroup/` (sources / classify / conditions / pipeline) + scripts
+`rxngroup_parse.py`, `rxngroup_merge_group.py`, `rxngroup_report.py` (+ sbatch). Pipeline per reaction:
+canonical dedup key · **34-class named-reaction SMARTS library** (couplings + reagent-gated Mitsunobu/
+Wittig/borylation/CuAAC + unimolecular FGIs via reactant→product motif change) · **reaction-center
+signature** to sub-split `other` · general condition extraction (metal/ligand/base-family/solvent-
+class/temp-bin, reusing `bhpu.chem.conditions`). A **reagent-partition** step splits substrates from
+pooled catalyst/base/solvent/gas (needed for CHORISO/CJHIF which dump everything into one reactant
+list; recovers CHORISO conditions → 85% solvent coverage). 6 SLURM parse jobs + dependent merge that
+dedups and writes **two catalogues: `_all` (incl. Pistachio) and `_public` (redistributable)**, each
+group carrying `n_pairs_public` (open-only matrix size). Outputs in gitignored
+`datasets/processed/private/rxn_groups/` (Pistachio is licensed).
+
+**Result:** 6 sources → 12.05M rows → **8.19M unique reactions** (752k reported in >1 source). Catalogues:
+`_all` 33,049 groups, `_public` 18,354 groups. **Pistachio-dependence (measured):** 82% of unique
+reactions are Pistachio-only; public (USPTO+ORDerly+CHORISO+CJHIF) = 18%. But it splits by class —
+public-only vs all substrate-pair matrix, top condition group per class:
+| class | all pairs | public pairs |
+|---|---|---|
+| amide coupling | 169,063 | 51,565 |
+| SNAr amination | 111,455 | 30,046 |
+| reductive amination | 57,912 | 18,193 |
+| Grignard/organolithium add. | 21,983 | 15,545 (71%) |
+| Suzuki–Miyaura (Pd/carbonate/ethereal) | 29,005 | **706 (2%)** |
+| Buchwald–Hartwig (top group) | 7,608 | **0** |
+| Sonogashira (top group) | 4,157 | 4,068 (98%) |
+
+**Interpretation / decision:** Metal-free workhorses (amide, SNAr, reductive amination, Grignard) are
+**fully covered by open data** → an open plate demo on these needs no Pistachio. **Cross-couplings
+(Suzuki, BH) stay Pistachio-dependent** — CHORISO didn't fix it because it's USPTO-derived (same
+patent gap); there's no open at-scale *non-patent* coupling corpus on the mount (only ~13k genuine
+CJHIF journal rows). For the open submission: lead the plate demo with amide/SNAr (airtight on public
+data), frame Suzuki/BH as "scales with licensed Pistachio". Note the project's **core BH positives
+come from the curated literature-HTE set (64k), not this general mining** — so the feasibility model
+itself isn't Pistachio-dependent. FGI classes are heuristic (net motif change, no atom-map confirm);
+C–H arylation is the lowest-precision template (placed last).
+
+**Next:** pick a plate class + condition group from `groups_report_public.html`; score its substrate
+matrix with the literature-PU `sup_histgb_l2` pipeline (Phase 3 of `PROSPECTIVE_PLATE_PLAN.md`).
+
 ## 2026-07-11 — Leakage audit: the HTE test never enters training (added to journal + both reports) — Jan's session (claude) [branch JSP-dataset-switch]
 
 **Context/Hypothesis:** Florian(human) asked, for the pitch: given the HTE-based val/test, is this

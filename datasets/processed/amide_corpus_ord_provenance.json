@@ -1,0 +1,18 @@
+{
+  "reaction_class": "amide_coupling",
+  "sources": [
+    "ord",
+    "orderly"
+  ],
+  "n_detected": 194625,
+  "n_unique_pairs": 52968,
+  "n_exact_test_pair_hits": 99,
+  "n_pairs_dropped_test_leak": 99,
+  "per_source_detected": {
+    "ORD": 119899,
+    "ORDerly-forward": 43273,
+    "ORDerly-condition": 31453
+  },
+  "chemlex_leakage_pairs": 7978,
+  "elapsed_seconds": 132.0
+}
