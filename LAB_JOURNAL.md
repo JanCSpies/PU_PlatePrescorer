@@ -18,6 +18,39 @@
 
 ---
 
+## 2026-07-11 — All PU methods on Chemlex: naive HistGB is not beaten (in-scope confirmation) — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** Florian(human) — the dataset-switch used only `sup_histgb_l2`. Run **every PU
+method we tried on JnJ** on the *in-scope* Chemlex amide set to confirm they still lose to the naive
+HistGB P-vs-U baseline (JnJ 2024 was out-of-domain; wanted a fairer, in-scope check). One SLURM job
+per method.
+
+**What I did:** New generic runner `scripts_JSP/run_chemlex_all_models.py --model <label>` (MODEL_ZOO =
+exact JnJ hyperparameters; nnpu/iw_pu prior retargeted to the Chemlex val base rate 0.237) over the
+champion's grid (transductive+inductive × raw_ecfp+corr08 × 5 seeds), + `summarize_chemlex_models.py`.
+5 SLURM jobs (55667–71). Smoke-tested each end-to-end first.
+
+**Result — TEST ROC-AUC, transductive/raw_ecfp (Δ vs HistGB champion 0.771):**
+| model | trans/raw | induc/raw | Δ |
+|---|---|---|---|
+| elkan (Elkan–Noto, HistGB) | 0.779±0.006 | 0.750 | +0.008 |
+| bagging (Bagging-PU, HistGB) | 0.774±0.002 | 0.770 | +0.004 |
+| **sup_histgb_l2 (champion)** | 0.771±0.003 | 0.767 | 0.000 |
+| spy (CatBoost 2-step) | 0.741±0.002 | 0.713 | −0.030 |
+| iw_pu (RuLSIF) | 0.644 | 0.679 | −0.127 |
+| nnpu (Kiryo) | 0.644 | 0.679 | −0.127 |
+
+**Interpretation / decision:** Splits by family. Risk-based/spy stay clearly worse (spy −0.03,
+nnpu/iw_pu −0.13). The **HistGB-ensemble PU methods (bagging, elkan) match/marginally edge HistGB**
+(+0.004/+0.008, ~noise) — because they *are* HistGB under the hood; the base learner does the work,
+not the PU wrapper. **No PU method beats the naive HistGB P-vs-U baseline by a margin worth the
+complexity → `sup_histgb_l2` stays the production model**, now confirmed in-scope (not just on OOD
+JnJ). Footnotes: `iw_pu ≡ nnpu` exactly (RuLSIF weights collapsed to ~uniform — density-ratio no-op);
+full table in `artifacts/dataset_switch/chemlex_model_comparison.md`.
+
+**Next:** none for the model choice — settled. Feed the winning `sup_histgb_l2` into the prospective
+plate scoring (see the plate + rxngroup catalogue entries below).
+
 ## 2026-07-11 — Reaction×condition catalogue over ORD/Pistachio/USPTO/CHORISO/CJHIF (plate-selection tool) — Jan's session (claude) [branch JSP-dataset-switch]
 
 **Context/Hypothesis:** Florian(human) — for the *prospective plate* project, cluster the big general
