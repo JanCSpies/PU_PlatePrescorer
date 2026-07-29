@@ -1,0 +1,90 @@
+{
+  "git_hash": "d7b7c249152b1d18a3692a96ace1b644b7d7f575",
+  "packages": {
+    "python": "3.14.4",
+    "numpy": "2.5.1",
+    "pandas": "3.0.3",
+    "scikit-learn": "1.9.0",
+    "catboost": "1.2.10",
+    "rdkit": "2026.3.3",
+    "bhpu": "0.1.0"
+  },
+  "config": {
+    "data": {
+      "root": "final_datasets",
+      "positives": "merged"
+    },
+    "featurizers": [
+      {
+        "name": "ecfp",
+        "params": {
+          "radius": 2,
+          "n_bits": 2048,
+          "use_conditions": false
+        },
+        "label": "ecfp_subs_only"
+      }
+    ],
+    "models": [
+      {
+        "name": "supervised",
+        "params": {
+          "base": "catboost",
+          "iterations": 300,
+          "depth": 6
+        },
+        "label": "sup_catboost"
+      },
+      {
+        "name": "supervised",
+        "params": {
+          "base": "histgb",
+          "iterations": 300,
+          "learning_rate": 0.1
+        },
+        "label": "sup_histgb"
+      },
+      {
+        "name": "supervised",
+        "params": {
+          "base": "histgb",
+          "iterations": 400,
+          "learning_rate": 0.05,
+          "l2_regularization": 1.0
+        },
+        "label": "sup_histgb_l2"
+      },
+      {
+        "name": "supervised",
+        "params": {
+          "base": "histgb",
+          "iterations": 400,
+          "learning_rate": 0.05,
+          "max_leaf_nodes": 15,
+          "l2_regularization": 1.0
+        },
+        "label": "sup_histgb_shallow"
+      },
+      {
+        "name": "bagging_pu",
+        "params": {
+          "n_estimators": 25,
+          "max_iter": 300,
+          "learning_rate": 0.05
+        },
+        "label": "bagging25"
+      },
+      {
+        "name": "elkan_noto",
+        "params": {
+          "max_iter": 300,
+          "learning_rate": 0.1
+        },
+        "label": "elkan"
+      }
+    ],
+    "seed": 0,
+    "threshold_strategy": "val_youden",
+    "out_dir": "artifacts/pubench/e5"
+  }
+}

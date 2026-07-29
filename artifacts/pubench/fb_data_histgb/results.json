@@ -1,0 +1,34 @@
+{
+  "model": {
+    "base": "histgb",
+    "iterations": 400,
+    "learning_rate": 0.05,
+    "l2_regularization": 1.0
+  },
+  "counts": {
+    "n_positives": 40072,
+    "n_unlabeled": 26368,
+    "n_val": 2624,
+    "n_test": 1920,
+    "val_pos_rate": 0.3197408536585366,
+    "test_pos_rate": 0.4359375
+  },
+  "results": [
+    {
+      "featurizer": "corr08",
+      "n_features": 862,
+      "val_roc_auc": 0.7691876750700282,
+      "val_auprc": 0.7069521443084563,
+      "test_roc_auc": 0.7585228871083576,
+      "test_auprc": 0.7508460471894601
+    },
+    {
+      "featurizer": "raw_ecfp",
+      "n_features": 4096,
+      "val_roc_auc": 0.7556354603820074,
+      "val_auprc": 0.6739281151626709,
+      "test_roc_auc": 0.7586795385621825,
+      "test_auprc": 0.7635653958357032
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "git_hash": "24193b4524906b16021a3b0a2d2086f472d094bf",
+  "packages": {
+    "python": "3.14.4",
+    "numpy": "2.5.1",
+    "pandas": "3.0.3",
+    "scikit-learn": "1.9.0",
+    "catboost": "1.2.10",
+    "rdkit": "2026.3.3",
+    "bhpu": "0.1.0"
+  },
+  "config": {
+    "data": {
+      "root": "final_datasets",
+      "positives": "merged"
+    },
+    "featurizers": [
+      {
+        "name": "ecfp",
+        "params": {
+          "radius": 2,
+          "n_bits": 2048,
+          "use_conditions": true
+        },
+        "label": "ecfp_subs_cond"
+      },
+      {
+        "name": "ecfp",
+        "params": {
+          "radius": 2,
+          "n_bits": 2048,
+          "use_conditions": false
+        },
+        "label": "ecfp_subs_only"
+      }
+    ],
+    "models": [
+      {
+        "name": "supervised",
+        "params": {
+          "iterations": 300,
+          "depth": 6
+        },
+        "label": null
+      },
+      {
+        "name": "spy",
+        "params": {
+          "iterations": 200,
+          "depth": 6,
+          "spy_fraction": 0.15
+        },
+        "label": null
+      },
+      {
+        "name": "nnpu",
+        "params": {
+          "prior": 0.32,
+          "epochs": 200,
+          "learning_rate": 0.05
+        },
+        "label": null
+      },
+      {
+        "name": "iw_pu",
+        "params": {
+          "prior": 0.32,
+          "epochs": 200,
+          "density_ratio": "rulsif"
+        },
+        "label": null
+      }
+    ],
+    "seed": 0,
+    "threshold_strategy": "val_youden",
+    "out_dir": "artifacts/pubench/phase2"
+  }
+}

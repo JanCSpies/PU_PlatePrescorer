@@ -1,0 +1,47 @@
+data:
+  base_filter:
+    apply_to:
+    - val
+    - test
+    keys:
+    - BVKZGUZCCUSVTD
+  positives: merged
+  root: final_datasets
+featurizers:
+- label: corr08
+  name: reduced_ecfp
+  params:
+    corr_threshold: 0.8
+    method: correlation
+    min_freq: 0.01
+    n_bits: 2048
+    use_conditions: false
+- label: cond_only
+  name: condition_descriptors
+  params:
+    ligand_cache: datasets/processed/features/ligand_descriptors.parquet
+- label: corr08+cond
+  name: composite
+  params:
+    components:
+    - name: reduced_ecfp
+      params:
+        corr_threshold: 0.8
+        method: correlation
+        min_freq: 0.01
+        n_bits: 2048
+        use_conditions: false
+    - name: condition_descriptors
+      params:
+        ligand_cache: datasets/processed/features/ligand_descriptors.parquet
+models:
+- label: sup_histgb_l2
+  name: supervised
+  params:
+    base: histgb
+    iterations: 400
+    l2_regularization: 1.0
+    learning_rate: 0.05
+out_dir: artifacts/pubench/e7a
+seed: 0
+threshold_strategy: val_youden

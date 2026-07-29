@@ -1,0 +1,141 @@
+{
+  "reaction": "Buchwald-Hartwig C-N (HiTEA)",
+  "model": {
+    "base": "histgb",
+    "iterations": 400,
+    "learning_rate": 0.05,
+    "l2_regularization": 1.0
+  },
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "k_neighbors": 5,
+  "threshold_pct": 10,
+  "regime": "transductive_only",
+  "inductive_note": "inductive impossible: 36 test substrates span the whole grid U",
+  "n_positives": 64061,
+  "test": {
+    "n": 36,
+    "base_rate": 0.6944444444444444
+  },
+  "pu": {
+    "corr08": {
+      "per_seed": [
+        {
+          "roc_auc": 0.6981818181818181,
+          "auprc": 0.8714844197205245,
+          "seed": 0.0
+        },
+        {
+          "roc_auc": 0.6763636363636363,
+          "auprc": 0.8581163804487459,
+          "seed": 1.0
+        },
+        {
+          "roc_auc": 0.72,
+          "auprc": 0.8795053259691676,
+          "seed": 2.0
+        },
+        {
+          "roc_auc": 0.6836363636363637,
+          "auprc": 0.8597713570372572,
+          "seed": 3.0
+        },
+        {
+          "roc_auc": 0.6509090909090909,
+          "auprc": 0.8443584478710233,
+          "seed": 4.0
+        }
+      ],
+      "mean": {
+        "roc_auc": 0.6858181818181819,
+        "auprc": 0.8626471862093437
+      },
+      "std": {
+        "roc_auc": 0.022952340128086546,
+        "auprc": 0.012046328208775759
+      }
+    },
+    "raw_ecfp": {
+      "per_seed": [
+        {
+          "roc_auc": 0.6981818181818181,
+          "auprc": 0.8580933316684082,
+          "seed": 0.0
+        },
+        {
+          "roc_auc": 0.6945454545454546,
+          "auprc": 0.8500906674725012,
+          "seed": 1.0
+        },
+        {
+          "roc_auc": 0.72,
+          "auprc": 0.8711550606256491,
+          "seed": 2.0
+        },
+        {
+          "roc_auc": 0.7236363636363636,
+          "auprc": 0.862058680699868,
+          "seed": 3.0
+        },
+        {
+          "roc_auc": 0.7090909090909091,
+          "auprc": 0.8588663858625833,
+          "seed": 4.0
+        }
+      ],
+      "mean": {
+        "roc_auc": 0.709090909090909,
+        "auprc": 0.860052825265802
+      },
+      "std": {
+        "roc_auc": 0.011499191491521378,
+        "auprc": 0.006808449566856941
+      }
+    }
+  },
+  "pu_bootstrap_ci": [
+    0.5266878858024692,
+    0.8863636363636364
+  ],
+  "baselines": {
+    "positives_only": {
+      "per_seed": [
+        {
+          "roc_auc": 0.6872727272727273,
+          "auprc": 0.817186227525136,
+          "seed": 0.0
+        }
+      ],
+      "mean": {
+        "roc_auc": 0.6872727272727273,
+        "auprc": 0.817186227525136
+      },
+      "std": {
+        "roc_auc": 0.0,
+        "auprc": 0.0
+      }
+    },
+    "true_loo": {
+      "per_seed": [
+        {
+          "roc_auc": 0.0,
+          "auprc": 0.6944444444444444,
+          "seed": 0.0
+        }
+      ],
+      "mean": {
+        "roc_auc": 0.0,
+        "auprc": 0.6944444444444444
+      },
+      "std": {
+        "roc_auc": 0.0,
+        "auprc": 0.0
+      }
+    }
+  }
+}

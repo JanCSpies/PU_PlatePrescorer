@@ -26,7 +26,23 @@ datasets/processed/private/
 literature/**/*.pdf
 
 # --- Model / experiment artifacts ---
-artifacts/
+# Experiment *results* ARE tracked (~2 MB): metrics JSONs, comparison tables, the
+# eval arrays and the report/explainer PDFs. They are what LAB_JOURNAL.md cites, they
+# are the submission deliverables, and regenerating them means re-running SLURM jobs
+# that need the licensed corpora in datasets/processed/private/.
+# Whitelist, not blanket-include: anything with a new/unexpected extension (large model
+# blobs, dumps) stays ignored until deliberately added here.
+artifacts/**
+!artifacts/**/
+!artifacts/**/*.json
+!artifacts/**/*.yaml
+!artifacts/**/*.csv
+!artifacts/**/*.md
+!artifacts/**/*.npz
+!artifacts/**/*.parquet
+!artifacts/**/*.pdf
+
+# Trained-model blobs are never tracked, including under artifacts/.
 *.cbm
 *.joblib
 *.pt
