@@ -18,6 +18,123 @@
 
 ---
 
+## 2026-07-13 — Plain-language explainer PDF (teaching doc for non-PU-experts) — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context:** Florian asked for a self-contained, out-of-domain-friendly explainer of the whole
+project — for readers with no PU-learning background.
+
+**What I did:** New `scripts_JSP/make_explainer.py` -> `artifacts/dataset_switch/PU_plate_prescoring_explainer.pdf`
+(13 pages). Covers, in simple terms with worked examples: the pipeline; what PU learning is and why
+(no failure list exists); how P (258,645 mined amide pairs), U (272×231=62,832 grid), TEST (2,234,
+35.5% feasible) and VAL (4,960, 23.7%) were assembled/split; transductive vs inductive; reporting
+bias (SCAR vs SAR); shadow features & P-vs-U separability; every PU model one-by-one (HistGB+L2,
+naive, Elkan-Noto, Bagging-PU, Spy, nnPU, iwPU, prop_ips, SAR-EM); the leaderboard; ROC-AUC vs AUPRC
+and why AUPRC matters for plates; plus a glossary. Figures are drawn from the REAL artifacts: the
+separability histograms (amide 0.931 well-separated vs BH 0.755 overlapping), the ROC/PR curves
+(eval_arrays), and the leaderboard bars (metric JSONs). Fully reproducible — `make_explainer.py`
+rebuilds its own `explainer_cache.npz` if absent. Regenerate: `uv run python -m scripts_JSP.make_explainer`.
+
+**Next:** none — reference doc. Good basis for the 3-min demo narration / write-up.
+
+## 2026-07-13 — Beyond-SCAR does NOT transfer to BH: prop_ips ties/loses on HiTEA (+ prop_ips plate report) — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** Two follow-ups to the prop_ips amide win (entry directly below). Florian asked
+to (1) re-score the plate grid with prop_ips so the PDF report reflects the new leader, and (2) test
+whether the +0.024 prop_ips advantage is a real, transferable effect or a **lucky one-shot** by
+rerunning the identical champion-vs-prop_ips-vs-sar_em head-to-head on a *second reaction class* — the
+HiTEA Buchwald-Hartwig C-N screen.
+
+**What I did:**
+- `scripts_JSP/run_multiseed_eval_propips.py` (+sbatch): prop_ips over the champion's grid
+  (transductive+inductive × raw_ecfp+corr08 × 5 seeds), writing `multiseed_metrics_propips.json` +
+  `eval_arrays_propips.npz` in the champion's exact layout. Parametrized `make_report.py`
+  (`--model propips`) → `plate_prescoring_report_propips.pdf` (champion report untouched; added a
+  shadow-feature section to the leakage audit). SLURM 55851 (50 min).
+- `scripts_JSP/run_hitea_sar.py` (+sbatch): champion + prop_ips + sar_em on HiTEA in ONE harness so
+  featurization/seeds/test are shared (P=64k merged BH positives, U=33×28 grid, TEST=36 pairs,
+  transductive-only, 5 seeds, percentile bootstrap CI, + a **shadow P-vs-U separability** diagnostic).
+  SLURM 55852 (32 min); smoke-validated first (55850). P shadow from precomputed `aryl_key`/`amine_key`.
+
+**Result — plate re-score (prop_ips, seed-mean TEST ROC-AUC):** transductive raw_ecfp 0.795±0.005,
+inductive raw_ecfp 0.784±0.002 — reproduces the cx_sar prop_ips run exactly → new PDF written.
+
+**Result — HiTEA BH (n=36, base rate 0.694; shadow P-vs-U separability 0.755 vs amide ~0.93):**
+| feat | champion | prop_ips | sar_em |
+|---|---|---|---|
+| raw_ecfp | 0.709±0.011 | 0.676±0.017 (**Δ −0.033**) | 0.689 (Δ −0.020) |
+| corr08 | 0.686±0.023 | 0.687±0.028 (Δ +0.001) | 0.671 (Δ −0.015) |
+Bootstrap CIs are huge and fully overlapping (champ raw_ecfp [0.527, 0.886]; prop_ips [0.498, 0.860]).
+
+**Interpretation / decision:** **The prop_ips advantage does NOT transfer to BH.** On the production
+featurizer prop_ips lands 0.033 *below* the champion — the point estimate flips sign vs the +0.024
+amide win — and it's a dead heat on corr08; sar_em is negative in both. With n=36 the CIs overlap
+almost completely, so strictly prop_ips is *statistically indistinguishable* from the champion on
+HiTEA — but this is clearly **not** a confirmation, and the central estimate points the wrong way. So
+the Chemlex win looks **reaction/dataset-specific, not a universal law.** Most likely mechanism: the
+correction only helps when there is a strong, *identifiable* reporting bias to correct, and the shadow
+P-vs-U separability measures exactly that — **0.93 on amide (big win) vs 0.755 on BH (no win)**. On BH
+there is much less genuine reporting bias for the reweighting to exploit, so it mostly adds variance.
+Honest read: **keep prop_ips as the amide-plate production model** (the domain where it wins; PDF
+ready), but do **not** generalize the beyond-SCAR claim across reaction classes — it is conditional on
+an identifiable reporting bias, and the separability number is a cheap ex-ante check for whether it
+will help.
+
+**Next:** (1) directly test the "identifiability gates the win" hypothesis — correlate shadow
+separability vs the prop_ips delta across more datasets. (2) HiTEA is a tiny, high-base-rate test; a
+larger BH set with real negatives would resolve the 0.02–0.03 effect the n=36 CI cannot. (3) Plate
+demo: use `plate_prescoring_report_propips.pdf` (amide).
+
+## 2026-07-13 — Beyond-SCAR arm on Chemlex: `prop_ips` beats the HistGB champion (+0.024) — Jan's session (claude) [branch JSP-dataset-switch]
+
+**Context/Hypothesis:** Follow-up to the 2026-07-11 entry below. That batch ran only **SCAR** PU
+methods (elkan/bagging/spy/nnpu/iw_pu) and none beat the naive HistGB P-vs-U baseline → we tentatively
+kept `sup_histgb_l2`. But the SCAR bake-off *cannot* answer the actual research question: does
+correcting the **feature-dependent reporting bias** (SAR / beyond-SCAR) help? Literature positives are
+selected-at-random by *popularity/availability*, not at constant rate. Hypothesis: model the reporting
+propensity on **reactivity-orthogonal shadow features** (report-frequency + ZINC in-stock, keyed by
+InChIKey-14 — see `src/pubench/features/propensity.py`) so it is identifiable and does not collapse
+into the ECFP feasibility signal (which is exactly why `iw_pu` degenerated to `nnpu`).
+
+**What I did:** New SAR arm — `src/pubench/models/sar.py` (`prop_ips`: one-shot inverse-propensity
+reweighting of positives in shadow space, then champion HistGB on outcome features; `sar_em`: Bekker
+2019 joint EM of feasibility `f(x)` and propensity `e(x_e)`), `ShadowFeatureBuilder`, and runner
+`scripts_JSP/run_chemlex_sar.py`. Same grid as the champion (transductive+inductive × raw_ecfp+corr08
+× 5 seeds). Two SLURM jobs completed clean: `prop_ips` (55845, 50 min) and `sar_em` (55847, 3 h 06).
+Pooled everything with `summarize_chemlex_models.py`.
+
+**Result — TEST ROC-AUC (5 seeds), ranked by production cell transductive/raw_ecfp; Δ vs champion 0.771:**
+| model | trans/raw | trans/corr08 | induc/raw | induc/corr08 | Δ |
+|---|---|---|---|---|---|
+| **prop_ips (SAR IPS, shadow space)** | **0.795±0.005** | 0.730±0.003 | **0.784±0.002** | **0.774±0.001** | **+0.024** |
+| elkan (SCAR) | 0.779±0.006 | 0.724 | 0.750 | 0.729 | +0.008 |
+| bagging (SCAR) | 0.774±0.002 | 0.727 | 0.770 | 0.746 | +0.004 |
+| sup_histgb_l2 (champion) | 0.771±0.003 | 0.726 | 0.767 | 0.745 | 0.000 |
+| sar_em (SAR joint EM) | 0.747±0.005 | 0.727 | 0.761 | 0.753 | −0.024 |
+| spy | 0.741 | 0.716 | 0.713 | 0.702 | −0.030 |
+| iw_pu ≡ nnpu | 0.644 | 0.640 | 0.679 | 0.672 | −0.127 |
+
+AUPRC moves the same way — `prop_ips` 0.632 vs champion 0.593 (trans/raw), and 0.642/0.644 vs
+0.621/0.603 inductive — the more relevant metric for ranking plate hits. Full table:
+`artifacts/dataset_switch/chemlex_model_comparison.md`.
+
+**Interpretation / decision:** The 2026-07-11 "naive HistGB is not beaten" verdict is **overturned by
+the beyond-SCAR arm.** `prop_ips` is the new leaderboard leader — it wins **every cell** of the grid,
+by the largest and tightest margin (+0.024 ≈ 4–5× the seed std; std 0.005). The mechanism is the whole
+thesis of this project: the *same* importance-weighting that collapsed to a no-op in ECFP outcome space
+(`iw_pu ≡ nnpu`, weights → uniform) becomes a real, useful correction once the propensity is fit in
+**shadow space**, where P vs U separate (design AUC≈0.93) reactivity-orthogonally → identifiable
+weights. Crucially the *mechanism matters, not just the shadow features*: the full joint EM `sar_em`
+has the identical shadow inputs yet **underperforms** the champion (−0.024) in production — its
+iterative E-step relabelling of U + M-step refit is high-variance and degrades the HistGB decision
+surface, whereas `prop_ips`'s one-shot reweighting keeps the champion's surface and only tilts the
+positive mass. (sar_em is only competitive in the inductive regime, 0.753–0.761.)
+
+**Next:** (1) Promote `prop_ips` to the plate-pre-scoring model and re-score the unlabeled amide grid
+with it (shadow tables already exist for the U corpus) — quantify hit-rate uplift vs the HistGB
+scoring. (2) Optional: light Optuna over `clip_quantile`/`prop_C` — current numbers are the first,
+untuned config. (3) Sanity-log the actual P-vs-U shadow-propensity AUC to confirm the ≈0.93
+separability claim empirically (currently a design assertion in the docstring).
+
 ## 2026-07-11 — All PU methods on Chemlex: naive HistGB is not beaten (in-scope confirmation) — Jan's session (claude) [branch JSP-dataset-switch]
 
 **Context/Hypothesis:** Florian(human) — the dataset-switch used only `sup_histgb_l2`. Run **every PU

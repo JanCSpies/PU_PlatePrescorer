@@ -19,7 +19,9 @@ Run with:  uv run python -m scripts_JSP.make_report
 
 from __future__ import annotations
 
+import argparse
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib
@@ -37,11 +39,54 @@ from sklearn.metrics import (
 )
 
 ART = Path("artifacts/dataset_switch")
-METRICS = ART / "multiseed_metrics.json"
-ARRAYS = ART / "eval_arrays.npz"
 PAYN_JSON = ART / "payn_baselines.json"  # optional PAYN-style baseline bars
 PAYN_NPZ = ART / "payn_baseline_arrays.npz"
-OUT_PDF = ART / "plate_prescoring_report.pdf"
+
+#: Model-description block for the executive summary (§Purpose), one string per rendered line.
+_CHAMPION_BLOCK = [
+    "Model: literature-only Positive-Unlabeled learning (258,645 amide positives mined from",
+    "ORD+Pistachio; U = the candidate acid x amine matrix), one L2-regularised HistGB on",
+    "substrate ECFP. Test = Chemlex wet-lab set (Nat Commun 2025), 2,234 held-out reactions,",
+    "feasible = conversion >= 20%. Deployment = rank the plate, run the top-K (budget-based).",
+]
+_PROPIPS_BLOCK = [
+    "Model: BEYOND-SCAR prop_ips. Literature positives (258,645 amide pairs mined from",
+    "ORD+Pistachio) are inverse-propensity reweighted in reactivity-orthogonal SHADOW space",
+    "(report-frequency + ZINC availability) to correct literature reporting bias, then an",
+    "L2-regularised HistGB is fit on substrate ECFP vs U = the candidate acid x amine matrix.",
+    "Test = Chemlex wet-lab set (Nat Commun 2025), 2,234 held-out reactions, feasible =",
+    "conversion >= 20%. Deployment = rank the plate, run the top-K (budget-based).",
+]
+
+
+@dataclass(frozen=True)
+class ReportConfig:
+    """Which model's artifacts to render and the model-specific prose for the text pages."""
+
+    metrics_path: Path
+    arrays_path: Path
+    out_path: Path
+    model_block: list[str]
+    shadow: bool  # True adds the shadow-feature (propensity) section to the leakage audit
+
+
+#: ``--model`` choice -> the artifacts + prose it renders. ``champion`` reproduces the original PDF.
+CONFIGS: dict[str, ReportConfig] = {
+    "champion": ReportConfig(
+        metrics_path=ART / "multiseed_metrics.json",
+        arrays_path=ART / "eval_arrays.npz",
+        out_path=ART / "plate_prescoring_report.pdf",
+        model_block=_CHAMPION_BLOCK,
+        shadow=False,
+    ),
+    "propips": ReportConfig(
+        metrics_path=ART / "multiseed_metrics_propips.json",
+        arrays_path=ART / "eval_arrays_propips.npz",
+        out_path=ART / "plate_prescoring_report_propips.pdf",
+        model_block=_PROPIPS_BLOCK,
+        shadow=True,
+    ),
+}
 
 BLUE, ORANGE, GREY = "#2b6cb0", "#dd6b20", "#718096"
 GREEN, RED = "#2f855a", "#c53030"
@@ -97,9 +142,9 @@ def _operating_curve(
     return k / len(ys), hits / k, hits / ys.sum()
 
 
-def _load() -> dict[str, dict]:
+def _load(arrays_path: Path) -> dict[str, dict]:
     """Load the seed-averaged test scores and derive per-regime evaluation blocks."""
-    arr = np.load(ARRAYS)
+    arr = np.load(arrays_path)
     reg: dict[str, dict] = {}
     for regime in ("transductive", "inductive"):
         y = arr[f"{regime}_test_y"]
@@ -140,11 +185,26 @@ def _draw_confusion(ax: plt.Axes, cm: dict[str, float], title: str) -> None:
     colors = [[GREEN, RED], [RED, GREEN]]
     for i in range(2):
         for j in range(2):
-            ax.text(j, i - 0.15, labels[i][j], ha="center", va="center",
-                    fontsize=11, weight="bold", color=colors[i][j])
+            ax.text(
+                j,
+                i - 0.15,
+                labels[i][j],
+                ha="center",
+                va="center",
+                fontsize=11,
+                weight="bold",
+                color=colors[i][j],
+            )
             ax.text(j, i + 0.08, f"{int(mat[i, j])}", ha="center", va="center", fontsize=15)
-            ax.text(j, i + 0.28, f"{mat[i, j] / total:.1%}", ha="center", va="center",
-                    fontsize=9, color=GREY)
+            ax.text(
+                j,
+                i + 0.28,
+                f"{mat[i, j] / total:.1%}",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color=GREY,
+            )
     ax.set_xticks([0, 1])
     ax.set_xticklabels(["SKIP well", "RUN well"])
     ax.set_yticks([0, 1])
@@ -156,23 +216,32 @@ def _draw_confusion(ax: plt.Axes, cm: dict[str, float], title: str) -> None:
 
 
 def main() -> None:
-    """Assemble the PDF report from the saved multi-seed metrics + scores."""
-    meta = json.loads(METRICS.read_text())
+    """Assemble the PDF report for the selected model from its saved multi-seed metrics + scores."""
+    parser = argparse.ArgumentParser(description="Render the plate-prescoring PDF report.")
+    parser.add_argument(
+        "--model",
+        choices=sorted(CONFIGS),
+        default="champion",
+        help="Which model's artifacts to render (default: the sup_histgb_l2 champion).",
+    )
+    cfg = CONFIGS[parser.parse_args().model]
+
+    meta = json.loads(cfg.metrics_path.read_text())
     metrics, seeds = meta["metrics"], meta["seeds"]
-    reg = _load()
-    OUT_PDF.parent.mkdir(parents=True, exist_ok=True)
-    with PdfPages(OUT_PDF) as pdf:
-        _summary_page(pdf, reg, metrics, seeds)
+    reg = _load(cfg.arrays_path)
+    cfg.out_path.parent.mkdir(parents=True, exist_ok=True)
+    with PdfPages(cfg.out_path) as pdf:
+        _summary_page(pdf, reg, metrics, seeds, cfg)
         _confusion_page(pdf, reg)
         _curves_page(pdf, reg)
         _payn_page(pdf, reg, metrics)  # skipped if the baseline artifacts are absent
         _payn_hitrate_page(pdf, reg)  # plate hit rate by model (skipped if artifacts absent)
         _plate_page(pdf, reg)
-        _leakage_page(pdf, reg)
-    print(f"Wrote {OUT_PDF}")
+        _leakage_page(pdf, reg, cfg)
+    print(f"Wrote {cfg.out_path}")
 
 
-def _summary_page(pdf: PdfPages, reg: dict, metrics: dict, seeds: list) -> None:
+def _summary_page(pdf: PdfPages, reg: dict, metrics: dict, seeds: list, cfg: ReportConfig) -> None:
     """Executive summary + multi-seed metric table."""
     t, i = reg["transductive"], reg["inductive"]
     c50 = i["cm"]
@@ -180,10 +249,7 @@ def _summary_page(pdf: PdfPages, reg: dict, metrics: dict, seeds: list) -> None:
         "§Purpose",
         "Pre-score a substrate plate (amide C-N coupling) so chemists run the wells likely to",
         "WORK and skip those likely to FAIL - more products per plate, fewer wasted experiments.",
-        "Model: literature-only Positive-Unlabeled learning (258,645 amide positives mined from",
-        "ORD+Pistachio; U = the candidate acid x amine matrix), one L2-regularised HistGB on",
-        "substrate ECFP. Test = Chemlex wet-lab set (Nat Commun 2025), 2,234 held-out reactions,",
-        "feasible = conversion >= 20%. Deployment = rank the plate, run the top-K (budget-based).",
+        *cfg.model_block,
         "",
         f"§Headline (mean over {len(seeds)} seeds; raw-ECFP production model)",
         f"  Transductive (U includes the plate's substrates):  ROC-AUC {t['auc']:.3f}"
@@ -221,33 +287,63 @@ def _summary_page(pdf: PdfPages, reg: dict, metrics: dict, seeds: list) -> None:
 def _confusion_page(pdf: PdfPages, reg: dict) -> None:
     """Confusion matrices at the headline budget + a budget-sweep table for deployment."""
     fig = plt.figure(figsize=(8.27, 11.69))
-    fig.suptitle(f"Confusion matrices - run the top {HEADLINE_BUDGET:.0%} of the plate",
-                 fontsize=14, weight="bold", color=BLUE, y=0.97)
-    gs = GridSpec(3, 2, figure=fig, height_ratios=[1.1, 1.1, 1.25], hspace=0.5, wspace=0.35,
-                  top=0.9, bottom=0.07, left=0.12, right=0.9)
+    fig.suptitle(
+        f"Confusion matrices - run the top {HEADLINE_BUDGET:.0%} of the plate",
+        fontsize=14,
+        weight="bold",
+        color=BLUE,
+        y=0.97,
+    )
+    gs = GridSpec(
+        3,
+        2,
+        figure=fig,
+        height_ratios=[1.1, 1.1, 1.25],
+        hspace=0.5,
+        wspace=0.35,
+        top=0.9,
+        bottom=0.07,
+        left=0.12,
+        right=0.9,
+    )
     for col, regime in enumerate(("transductive", "inductive")):
         r = reg[regime]
-        _draw_confusion(fig.add_subplot(gs[0, col]), r["cm"],
-                        f"{regime.capitalize()} (n={len(r['y'])})")
+        _draw_confusion(
+            fig.add_subplot(gs[0, col]), r["cm"], f"{regime.capitalize()} (n={len(r['y'])})"
+        )
     ax = fig.add_subplot(gs[1, :])
     ax.axis("off")
     ind = reg["inductive"]
     rows = [_confusion_topk(ind["y"], ind["s"], b) for b in BUDGETS]
     cell = [
-        [f"{b:.0%}", f"{c['precision']:.1%}", f"{c['recall']:.1%}", f"{c['specificity']:.1%}",
-         f"{c['tp']}", f"{c['fp']}", f"{c['tn']}", f"{c['fn']}"]
+        [
+            f"{b:.0%}",
+            f"{c['precision']:.1%}",
+            f"{c['recall']:.1%}",
+            f"{c['specificity']:.1%}",
+            f"{c['tp']}",
+            f"{c['fp']}",
+            f"{c['tn']}",
+            f"{c['fn']}",
+        ]
         for b, c in zip(BUDGETS, rows, strict=True)
     ]
     tbl = ax.table(
         cellText=cell,
         colLabels=["run", "hit rate", "coverage", "fails\nskipped", "TP", "FP", "TN", "FN"],
-        loc="center", cellLoc="center", bbox=[0.02, 0.0, 0.96, 0.92],
+        loc="center",
+        cellLoc="center",
+        bbox=[0.02, 0.0, 0.96, 0.92],
     )
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(10)
     tbl.scale(1, 1.6)
-    ax.set_title("Operating points for the deployment (inductive) model - pick a budget",
-                 fontsize=11.5, weight="bold", pad=10)
+    ax.set_title(
+        "Operating points for the deployment (inductive) model - pick a budget",
+        fontsize=11.5,
+        weight="bold",
+        pad=10,
+    )
     axt = fig.add_subplot(gs[2, :])
     axt.axis("off")
     c = reg["inductive"]["cm"]
@@ -285,8 +381,12 @@ def _curves_page(pdf: PdfPages, reg: dict) -> None:
         ax.grid(alpha=0.3)
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
-    fig.suptitle("Discrimination curves (seed-averaged production model)",
-                 fontsize=14, weight="bold", color=BLUE)
+    fig.suptitle(
+        "Discrimination curves (seed-averaged production model)",
+        fontsize=14,
+        weight="bold",
+        color=BLUE,
+    )
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     pdf.savefig(fig)
     plt.close(fig)
@@ -317,15 +417,35 @@ def _payn_page(pdf: PdfPages, reg: dict, metrics: dict) -> None:
         ("true / ceiling", true_auc, true_sd, GREEN),
     ]
     fig = plt.figure(figsize=(8.27, 11.69))
-    fig.suptitle("PAYN-style comparison - what the literature buys you",
-                 fontsize=14, weight="bold", color=BLUE, y=0.97)
-    gs = GridSpec(3, 1, figure=fig, height_ratios=[1.0, 1.35, 0.95], hspace=0.5,
-                  top=0.9, bottom=0.06, left=0.14, right=0.92)
+    fig.suptitle(
+        "PAYN-style comparison - what the literature buys you",
+        fontsize=14,
+        weight="bold",
+        color=BLUE,
+        y=0.97,
+    )
+    gs = GridSpec(
+        3,
+        1,
+        figure=fig,
+        height_ratios=[1.0, 1.35, 0.95],
+        hspace=0.5,
+        top=0.9,
+        bottom=0.06,
+        left=0.14,
+        right=0.92,
+    )
 
     axb = fig.add_subplot(gs[0])
     pos_y = np.arange(len(bars))
-    axb.barh(pos_y, [b[1] for b in bars], xerr=[b[2] for b in bars], color=[b[3] for b in bars],
-             height=0.62, error_kw={"ecolor": "#4a5568", "capsize": 4})
+    axb.barh(
+        pos_y,
+        [b[1] for b in bars],
+        xerr=[b[2] for b in bars],
+        color=[b[3] for b in bars],
+        height=0.62,
+        error_kw={"ecolor": "#4a5568", "capsize": 4},
+    )
     for yv, (_, v, e, _c) in zip(pos_y, bars, strict=True):
         axb.text(v + e + 0.006, yv, f"{v:.3f}", va="center", fontsize=11, weight="bold")
     axb.axvline(0.5, ls="--", color=RED, lw=1.2)
@@ -334,18 +454,25 @@ def _payn_page(pdf: PdfPages, reg: dict, metrics: dict) -> None:
     axb.invert_yaxis()
     axb.set_xlim(0.45, min(1.0, max(b[1] for b in bars) + 0.09))
     axb.set_xlabel("TEST ROC-AUC (inductive / novel substrates; random = 0.5)", fontsize=10)
-    axb.set_title("Feasibility discrimination on 2,234 held-out Chemlex reactions",
-                  fontsize=11, weight="bold")
+    axb.set_title(
+        "Feasibility discrimination on 2,234 held-out Chemlex reactions", fontsize=11, weight="bold"
+    )
     axb.grid(axis="x", alpha=0.3)
 
     axr = fig.add_subplot(gs[1])
-    for s, name, col in ((pos_s, "positives-only", GREY), (pu_s, "PU - ours", ORANGE),
-                         (true_s, "true (upper bound)", GREEN)):
+    for s, name, col in (
+        (pos_s, "positives-only", GREY),
+        (pu_s, "PU - ours", ORANGE),
+        (true_s, "true (upper bound)", GREEN),
+    ):
         fpr, tpr, _ = roc_curve(y, s)
         axr.plot(fpr, tpr, color=col, lw=2, label=f"{name} (AUC {roc_auc_score(y, s):.3f})")
     axr.plot([0, 1], [0, 1], "--", color=GREY, lw=1)
-    axr.set(xlabel="false positive rate", ylabel="true positive rate",
-            title="ROC - three models, identical held-out test")
+    axr.set(
+        xlabel="false positive rate",
+        ylabel="true positive rate",
+        title="ROC - three models, identical held-out test",
+    )
     axr.legend(fontsize=9, loc="lower right")
     axr.grid(alpha=0.3)
     axr.set_xlim(0, 1)
@@ -358,9 +485,12 @@ def _payn_page(pdf: PdfPages, reg: dict, metrics: dict) -> None:
         f"Our literature-PU model ({pu_auc:.3f}) MATCHES/BEATS the in-domain ceiling "
         f"({true_auc:.3f}) - with\n   ZERO Chemlex labels. 258k diverse literature positives "
         "out-signal 4,960 in-domain rows\n   on novel substrates."
-        if beats_ceiling else
-        f"Our literature-PU model ({pu_auc:.3f}) sits between the naive skyline and the in-domain\n"
-        f"   ceiling ({true_auc:.3f}) - the classic PAYN ordering, with ZERO Chemlex labels."
+        if beats_ceiling
+        else (
+            f"Our literature-PU model ({pu_auc:.3f}) sits between the naive skyline and the "
+            f"in-domain\n   ceiling ({true_auc:.3f}) - the classic PAYN ordering, with ZERO "
+            "Chemlex labels."
+        )
     )
     txt = (
         "The three models, scored on the identical 2,234-reaction test (raw-ECFP features):\n"
@@ -398,10 +528,24 @@ def _payn_hitrate_page(pdf: PdfPages, reg: dict) -> None:
         ("true (upper bound)", true_s, GREEN),
     ]
     fig = plt.figure(figsize=(8.27, 11.69))
-    fig.suptitle("Plate hit rate by model - which pre-scorer to run",
-                 fontsize=14, weight="bold", color=BLUE, y=0.97)
-    gs = GridSpec(2, 1, figure=fig, height_ratios=[1.35, 1.0], hspace=0.32,
-                  top=0.9, bottom=0.08, left=0.12, right=0.93)
+    fig.suptitle(
+        "Plate hit rate by model - which pre-scorer to run",
+        fontsize=14,
+        weight="bold",
+        color=BLUE,
+        y=0.97,
+    )
+    gs = GridSpec(
+        2,
+        1,
+        figure=fig,
+        height_ratios=[1.35, 1.0],
+        hspace=0.32,
+        top=0.9,
+        bottom=0.08,
+        left=0.12,
+        right=0.93,
+    )
 
     ax = fig.add_subplot(gs[0])
     for name, s, col in models:
@@ -410,8 +554,9 @@ def _payn_hitrate_page(pdf: PdfPages, reg: dict) -> None:
     ax.axhline(base, color=RED, ls=":", lw=1.5, label=f"random ({base:.1%})")
     ax.set_xlabel("fraction of plate run (top-scored wells first)", fontsize=11)
     ax.set_ylabel("hit rate (precision)", fontsize=11)
-    ax.set_title("Hit rate vs how much of the plate you run, per ranking model",
-                 fontsize=11.5, weight="bold")
+    ax.set_title(
+        "Hit rate vs how much of the plate you run, per ranking model", fontsize=11.5, weight="bold"
+    )
     ax.legend(fontsize=9.5, loc="upper right")
     ax.grid(alpha=0.3)
     ax.set_xlim(0, 1)
@@ -429,13 +574,19 @@ def _payn_hitrate_page(pdf: PdfPages, reg: dict) -> None:
     tbl = axt.table(
         cellText=cell,
         colLabels=["run top", "positives-only", "PU - ours", "true (upper bd)"],
-        loc="center", cellLoc="center", bbox=[0.04, 0.30, 0.92, 0.56],
+        loc="center",
+        cellLoc="center",
+        bbox=[0.04, 0.30, 0.92, 0.56],
     )
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(10.5)
     tbl.scale(1, 1.6)
-    axt.set_title("Hit rate / coverage at fixed plate budgets  (cell = hit-rate % / coverage %)",
-                  fontsize=11, weight="bold", pad=8)
+    axt.set_title(
+        "Hit rate / coverage at fixed plate budgets  (cell = hit-rate % / coverage %)",
+        fontsize=11,
+        weight="bold",
+        pad=8,
+    )
     p35 = {name: _confusion_topk(y, s, 0.35) for name, s, _c in models}
     cap = (
         f"Read: rank the plate by a model, run the top X% (left column). Random picking hits "
@@ -460,35 +611,58 @@ def _plate_page(pdf: PdfPages, reg: dict) -> None:
         frac, prec, rec = _operating_curve(r["s"], r["y"])
         ax.plot(frac, prec, color=color, lw=2.2, label=f"{regime}: hit rate (precision)")
         ax.plot(frac, rec, color=color, lw=1.6, ls="--", label=f"{regime}: coverage (recall)")
-    ax.axhline(reg["inductive"]["base"], color=RED, ls=":", lw=1.5,
-               label=f"random hit rate ({reg['inductive']['base']:.1%})")
+    ax.axhline(
+        reg["inductive"]["base"],
+        color=RED,
+        ls=":",
+        lw=1.5,
+        label=f"random hit rate ({reg['inductive']['base']:.1%})",
+    )
     ax.set_xlabel("fraction of plate run (top-scored wells first)", fontsize=11)
     ax.set_ylabel("hit rate  /  coverage", fontsize=11)
-    ax.set_title("Plate operating curve - run fewer wells, hit more often",
-                 fontsize=14, weight="bold", color=BLUE)
+    ax.set_title(
+        "Plate operating curve - run fewer wells, hit more often",
+        fontsize=14,
+        weight="bold",
+        color=BLUE,
+    )
     ax.legend(fontsize=9.5, loc="center right")
     ax.grid(alpha=0.3)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    note = ("Read: run only the top-scored fraction X of the plate (x-axis) -> solid = fraction\n"
-            "that actually work (hit rate); dashed = fraction of all feasible reactions still\n"
-            "captured (coverage). The gap above the red line is the experiments-saved value.")
+    note = (
+        "Read: run only the top-scored fraction X of the plate (x-axis) -> solid = fraction\n"
+        "that actually work (hit rate); dashed = fraction of all feasible reactions still\n"
+        "captured (coverage). The gap above the red line is the experiments-saved value."
+    )
     fig.text(0.1, 0.02, note, fontsize=9.5, color=GREY)
     fig.tight_layout(rect=(0, 0.06, 1, 1))
     pdf.savefig(fig)
     plt.close(fig)
 
 
-def _leakage_page(pdf: PdfPages, reg: dict) -> None:
+def _leakage_page(pdf: PdfPages, reg: dict, cfg: ReportConfig) -> None:
     """Reviewer-facing data-leakage audit: what the model sees at train time and what it never does.
 
     Traces the actual fit path (``SupervisedBaseline.fit(P, U)`` -> ``HistGB.fit(vstack([P, U]))``);
     the held-out Chemlex labels are consumed only by ``predict_proba`` at scoring time. The
     transductive/inductive AUCs are read live from ``reg`` so the "no exposure" claim always quotes
-    the report's own numbers.
+    the report's own numbers. For the beyond-SCAR model an extra section covers the shadow features.
     """
     t = reg["transductive"]["auc"]
     i = reg["inductive"]["auc"]
+    shadow_section = (
+        [
+            "",
+            "§5. Shadow (propensity) features carry no target labels",
+            "prop_ips reweights positives using report-frequency (ORDerly, ~832k reactions) and",
+            "ZINC in-stock flags - popularity/availability signals tied to building-block ID,",
+            "never to Chemlex outcomes. They enter only at fit time, to weight P; VAL and TEST are",
+            "scored by the outcome HistGB alone, so the bias correction adds no test-label leak.",
+        ]
+        if cfg.shadow
+        else []
+    )
     lines = [
         "§Data-leakage audit - does the test set touch training?",
         "Short answer: NO. The classifier sees zero target (Chemlex) labels while training.",
@@ -516,6 +690,7 @@ def _leakage_page(pdf: PdfPages, reg: dict) -> None:
         "The inductive run (test substrates fully REMOVED from U) reproduces the AUC",
         f"({i:.3f} vs {t:.3f}), so the result does not ride on test-substrate exposure. The",
         "split is substrate-disjoint (Both_Unseen): test acids AND amines are novel vs train.",
+        *shadow_section,
         "",
         "§One caveat we state openly",
         "The only place a human saw the test is model-selection altitude: which featurizer to",

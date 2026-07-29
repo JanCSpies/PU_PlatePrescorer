@@ -39,11 +39,13 @@ mlruns/
 slurm/logs/*.out
 slurm/logs/*.err
 
-# Colleague's separate package (its own git repo)
-gpuma/
+# Colleague's separate package (its own git repo).
+# No trailing slash: in this checkout these are *symlinks* into a collaborator's
+# home directory, and a "gpuma/" pattern would only match a real directory.
+gpuma
 
 # External upstream repos (their own git history, not tracked here)
-external/
+external
 
 # Licensed (Pistachio-derived) assembled datasets — never publish
 final_datasets/private/
