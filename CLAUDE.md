@@ -93,6 +93,15 @@ general, and no claim of generality should be made from Chemlex alone. See `LAB_
 elevates it is showing the model works **prospectively, on a reaction class with no HTE data**, in a
 real plate.
 
+**And there is no retrospective route left.** A systematic survey (`Future_datasets.md`) found that
+**no public dataset besides Chemlex and HiTEA** has a diverse product matrix + genuinely measured
+negatives + literature-common conditions. The near-misses fail structurally, not incidentally:
+Perera/Reizman Suzuki vary handle and conditions on a fixed coupling (≈ one product, not a matrix);
+AbbVie's 23k-product Suzuki corpus is structure-redacted; AstraZeneca ELN negatives are
+missing-not-failed; LSF borylation is mono-molecular. So the retrospective well is dry — the next
+test set has to be **made in the lab**. That is an argument *for* the experiment, and it belongs in
+the paper.
+
 **Validation hierarchy** — each tier is a stronger claim than the last:
 
 ```
@@ -186,7 +195,7 @@ LAB_JOURNAL.md            # append-only experiment log (the lab notebook)
 RESULTS.md                # consolidated retrospective results
 PROSPECTIVE_PLATE_PLAN.md # ← the wet-lab validation experiment (paper's core)
 PROSPECTIVE_REACTION_CONDITION_GROUPING.md  # picking the reaction class + condition cluster
-Future_datasets.md        # candidate public test sets
+Future_datasets.md        # CLOSED survey: why no public dataset is left to test on
 src/pubench/              # PU benchmark: models, features, mining, eval  (primary)
 src/bhpu/                 # earlier pipeline: chem, features, leakage, space  (foundational)
 scripts_JSP/              # CLI entrypoints + SLURM sbatch files

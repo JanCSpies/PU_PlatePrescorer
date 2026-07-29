@@ -1,9 +1,39 @@
-# Future Datasets — candidate test sets for a literature-trained PU feasibility classifier
+# Public HTE datasets — survey, and why the usable ones are exhausted
 
-> **Status:** research note, 2026-07-09 (JSP session). Decision NOT yet made.
-> **Purpose:** shortlist of public reaction datasets that could replace the current
-> test set (`JNJ HTE 2024` / Neves et al.) as the held-out feasibility test.
-> **Method:** deep-research harness — 3 search angles, 14 primary sources fetched,
+> **Status: CLOSED — question answered, decision made (updated 2026-07-29).**
+> Read this as *evidence*, not as a menu. Its conclusion is the motivation for the wet-lab
+> experiment in `PROSPECTIVE_PLATE_PLAN.md`.
+>
+> **What it was for (2026-07-09):** at the time the project tested on `JnJ HTE 2024` (Neves et al.)
+> and transfer was ~random, so this was a search for a *replacement public test set*.
+> **What happened:** the search ran, the two viable candidates were adopted, and both were used —
+> **Chemlex amide** (TEST n=2,234) and the **HiTEA BH slice** (TEST n=36). Nothing here is pending.
+>
+> **The conclusion that matters now.** Applying the three requirements below strictly, **no public
+> dataset besides Chemlex and HiTEA qualifies**, and each of those has a hard ceiling:
+>
+> | | why it fails the bar |
+> |---|---|
+> | **Chemlex amide** | ✅ used — but ~48 % of negatives are chemist-rule-designed, not measured, and conditions are narrowed (1 solvent, 2 bases) |
+> | **HiTEA BH** | ✅ used — but the BH slice is only **29 distinct substrate pairs** (→ our n=36 test, CIs so wide the result barely constrains anything) |
+> | LSF borylation | mono-molecular (40 substrates), not a substrate-pair matrix |
+> | Jaman SNAr | ~192 pairs, readout is a semiquantitative MS threshold, not yield |
+> | AstraZeneca ELN BH | negatives **refuted** — "no product" is likely missing-not-failed |
+> | AbbVie Suzuki | 23k diverse products, but **structures redacted** — no SMILES, cannot featurise |
+> | RSC 2025 amide | 632 pairs, but (b) and (c) never verified |
+>
+> **Therefore:** the public literature contains **no untapped dataset** with a diverse product matrix,
+> genuinely measured negatives, and literature-common conditions. This is not a gap to keep searching
+> for — it is a structural fact about what has been published, and it is precisely why the next test
+> set has to be **generated in the lab**. For the paper, this survey is the Methods/SI justification
+> that the prospective experiment was necessary rather than merely nice to have.
+>
+> **Note on Suzuki specifically:** its absence from the viable list is not an oversight. Perera 2018
+> varies leaving group, boron source, and conditions on a fixed coupling (≈ one product); Reizman/
+> Jensen is condition optimisation. Neither is a substrate matrix. AbbVie is the only diverse-product
+> Suzuki corpus and it is unusable. That is *why* Suzuki is a legitimate prospective target.
+>
+> **Method (unchanged):** deep-research harness — 3 search angles, 14 primary sources fetched,
 > 68 claims extracted, 25 adversarially verified (3-vote, need 2/3 to kill),
 > 22 confirmed / 3 refuted. All claims below rest on peer-reviewed primary sources
 > with live open deposits unless flagged.
@@ -156,9 +186,15 @@ natural-conditions HTE sets (below) beat JnJ on (c) without losing (b).
 
 ---
 
-## Recommendation (as of this note)
+## Recommendation — *decided, both arms taken* (outcome added 2026-07-29)
 
-The fork "better BH set" vs "switch reaction" now has a clear winner on each side:
+> **Outcome:** we did not choose between these — we ran **both**. Chemlex became the anchor result
+> (TEST ROC-AUC 0.768 inductive, beating the in-domain supervised ceiling 0.733); HiTEA BH was run as
+> the independent replication and reached 0.709 on n=36 with CIs so wide it neither confirms nor
+> refutes. That asymmetry — one solid class, one underpowered class, and nothing else public to try —
+> is what closed this line of inquiry and opened the wet-lab one.
+
+The fork "better BH set" vs "switch reaction" had a clear winner on each side:
 
 - **Stay in BH → Pfizer HiTEA.** Only new dataset that is *actual BH* with genuinely measured
   negatives under natural pharma conditions → directly fixes the (c) OOD gap that killed JnJ.
@@ -174,10 +210,18 @@ The domain-gap problem shrinks rather than grows.
 
 ---
 
-## Open questions to resolve before committing
+## Open questions — status as of 2026-07-29
 
-1. **Chemlex:** exact count/fraction of genuinely *measured* sub-20% failures, separated from the
-   ~5,600 rule-designed synthetic negatives. Determines whether (b) is "real" enough.
+> Q1 is **still open and now matters more than it did**, because Chemlex is the paper's anchor result.
+> Q2–Q3 are moot (those datasets were not adopted / the HiTEA slice was used as-is and its small n is
+> reported honestly). Q4 folds into the general condition-scope argument.
+
+1. ⚠️ **STILL OPEN — Chemlex:** exact count/fraction of genuinely *measured* sub-20% failures,
+   separated from the ~5,600 rule-designed synthetic negatives. Determines whether (b) is "real"
+   enough. **A reviewer will ask this**: if a large share of the test negatives were never run in a
+   lab, then "beats the in-domain ceiling" is partly a statement about agreement with a rule set
+   rather than with experiment. Resolve before submission — either quantify the measured subset and
+   re-report the headline on it alone, or state the limitation explicitly.
 2. **AstraZeneca ELN:** is 39.9% "no product" truly measured or missing-not-failed, and is the
    781-reaction file actually downloadable? (Both left unresolved/refuted.)
 3. **HiTEA:** is the 29-pair BH slice diverse enough alone, or must we pool the broader multi-class

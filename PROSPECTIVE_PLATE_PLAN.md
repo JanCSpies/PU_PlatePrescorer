@@ -5,15 +5,22 @@
 > 2026-07-11 as post-hackathon runway; the hackathon was retired without submission and the project is
 > now a publication track targeting JACS or higher.
 >
-> ⚠️ **One design criterion changed and it bears on §1.** The paper's claim is that the method works
-> for reaction classes with **no existing HTE dataset** — that is the situation where plate
-> pre-scoring is actually needed, and it is the sharpest differentiator from PAYN. Suzuki–Miyaura,
-> proposed below as the first target, **has** public HTE datasets (Perera 2018, Reizman/Jensen). That
-> makes it the *safest* choice — an external yardstick exists — but the *weakest* demonstration of the
-> central claim. Resolve deliberately before committing plate capacity: either run Suzuki first as a
-> de-risking rehearsal and a class with no HTE data as the headline, or go straight to the latter.
-> Everything else in this plan (best-vs-random-vs-worst, frozen scores, literature conditions) is
-> unchanged and applies either way.
+> **Suzuki–Miyaura still stands as the first target, and the "no existing HTE dataset" criterion
+> supports it rather than conflicting with it.** The relevant question is not "does a Suzuki HTE
+> dataset exist" but "does one exist with a **diverse product matrix under fixed, literature-common
+> conditions**" — the only kind that could serve as a retrospective test here. It does not:
+>
+> - **Perera 2018 (Science, flow HTE)** varies **leaving group, boron source, and conditions** on a
+>   fixed coupling — a condition/handle screen yielding essentially one product, not a substrate matrix.
+> - **Reizman/Jensen** is condition optimisation over a couple of substrate pairs.
+> - **AbbVie 15-yr Suzuki (JACS 2024)** is the one genuinely diverse-product Suzuki corpus
+>   (23k products) — and it is **structure-redacted**, one-hot encoded with no SMILES, so a
+>   literature-trained model cannot featurise it. See `Future_datasets.md`.
+>
+> So Suzuki is exactly the regime the paper is about: abundant literature positives, cheap stable
+> stock, real substrate-intrinsic failure modes, and **no public HTE matrix to test against** — which
+> is why the test set has to be made in the lab. The trade-off to accept consciously is that there is
+> then *no external retrospective yardstick* for this class; the prospective plate is the evidence.
 > **Purpose:** convert our *offline* result ("literature-only PU pre-scorer beats random/positives-
 > only on held-out HTE sets") into a *prospective* wet-lab result ("we ranked a real substrate matrix,
 > ran the top-96 and a random-96, and the model's plate had a materially higher hit rate").
