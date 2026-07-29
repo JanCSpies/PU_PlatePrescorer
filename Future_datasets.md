@@ -14,7 +14,7 @@
 >
 > | | why it fails the bar |
 > |---|---|
-> | **Chemlex amide** | ✅ used — but ~48 % of negatives are chemist-rule-designed, not measured, and conditions are narrowed (1 solvent, 2 bases) |
+> | **Chemlex amide** | ✅ used — all 11,669 rows measured; caveat is that negatives are *enriched by expert-rule design* rather than randomly sampled, and conditions are narrowed (1 solvent, 2 bases) |
 > | **HiTEA BH** | ✅ used — but the BH slice is only **29 distinct substrate pairs** (→ our n=36 test, CIs so wide the result barely constrains anything) |
 > | LSF borylation | mono-molecular (40 substrates), not a substrate-pair matrix |
 > | Jaman SNAr | ~192 pairs, readout is a semiquantitative MS threshold, not yield |
@@ -67,7 +67,7 @@ natural-conditions HTE sets (below) beat JnJ on (c) without losing (b).
 
 | # | Dataset | Reaction | Diversity (a) | Real negatives (b) | Natural conditions (c) | Available? |
 |---|---|---|---|---|---|---|
-| 1 | **Chemlex acid–amine** | Amide coupling | ✅ 272 acids × 231 amines, 8,095 products | ⚠️ 20% react/no-react; **~48% of negatives rule-designed, not measured** | ✅ standardized common reagents (narrowed, not exotic) | ✅ Zenodo, CC-BY-NC |
+| 1 | **Chemlex acid–amine** | Amide coupling | ✅ 272 acids × 231 amines, 8,095 products | ✅ **all 11,669 measured** (82% of negatives are a hard 0.00); ⚠️ negatives *enriched by expert-rule design*, not randomly sampled | ✅ standardized common reagents (narrowed, not exotic) | ✅ Zenodo, CC-BY-NC |
 | 2 | **Pfizer HiTEA "reactome"** | **BH** + Ullmann + 2× hydrogenation | ⚠️ full corpus diverse; **BH slice 29 distinct pairs (wide-but-shallow)** | ✅✅ genuinely measured 0% yields | ✅✅ ~10 yr real pharma HTE | ✅ GitHub, CC-BY |
 | 3 | **ETH/Roche LSF borylation** | C–H borylation | ⚠️ 40 substrates (mono-molecular, not a pair matrix) | ✅ LCMS success/fail, authentic negatives | ✅✅ **only candidate verified on all 3** | ✅ GitHub |
 | 4 | **Jaman SNAr** | SNAr (amine + aryl halide) | ✅ ~192 pairs (16 amines × 13 halides) | ✅ measured, majority fail | ⚠️ semiquantitative MS threshold | ✅ via PMC |
@@ -86,10 +86,26 @@ natural-conditions HTE sets (below) beat JnJ on (c) without losing (b).
 - **Size / diversity (a):** 11,669 reactions for 8,095 target products, covering **272 acids ×
   231 amines**, 6 condensation reagents, 2 bases, 1 solvent. Authors explicitly contrast their
   substrate-diversity emphasis against narrow BH/Suzuki condition screens. ✅
-- **Negatives (b):** explicit react/no-react boundary at **20% yield** (Fig. 5). ⚠️ **CAVEAT:**
-  ~5,600 of the negatives (~48% of rows) are **chemist-rule-designed synthetic** (never lab-run);
-  the paper does **not** tabulate the count of genuinely *measured* sub-20% failures. **Must
-  verify the measured-negative fraction before use.**
+- **Negatives (b):** explicit react/no-react boundary at **20 % conversion** (Fig. 5).
+  ✅ **RESOLVED 2026-07-29 — the negatives ARE measured.** An earlier revision of this note claimed
+  ~5,600 negatives were "chemist-rule-designed synthetic (never lab-run)". **That was wrong**, and it
+  conflated *how reactions were chosen for the plate* with *how their labels were assigned*.
+  Verified directly against `datasets/raw/Chemlex/Chemlex_Acidamine_Wetlab_Data.xlsx`:
+  - **11,669 / 11,669 rows carry a measured `Conversion`; zero nulls; 3,305 distinct non-zero values.**
+    Every reaction was physically run (200–300 µL, 156 instrument-hours, LC-MS UV readout).
+  - At the 20 % threshold: **3,055 feasible (26.2 %) / 8,614 infeasible (73.8 %)**. Of the negatives,
+    **82.4 % are a hard measured 0.00** — a detected absence of product, not a missing record.
+  - The paper itself reports "surprising" reactions — expert-predicted-negative that came back
+    high-yield. Those can only be found by *running* them.
+- ⚠️ **The real caveat is selection bias, not fabricated labels.** The ~5,600 expert-rule reactions
+  were **designed onto the plate** to be *likely* failures (steric hindrance, weak nucleophilicity)
+  so the dataset would be negative-rich — running only literature-plausible pairs yields an almost
+  all-positive set, useless for learning failure. Consequence: the negative class is **enriched for
+  chemically obvious failure modes** rather than being a random sample of substrate space. A model
+  can therefore score well partly by learning "bulky acid + weak nucleophile → fails", which is real
+  but shallow. **So the honest concern is that ROC-AUC on this set may be optimistic relative to a
+  random substrate matrix**, where failures are subtler and more varied — not that the labels are
+  synthetic. This is precisely the bias a prospective random-vs-model plate does not have.
 - **Conditions (c):** standardized common amide-coupling reagents — common, but a *narrowed*
   condition distribution (single solvent, 2 bases). Mild condition shift, not exotic OOD.
 - **Availability:** Zenodo `10.5281/zenodo.12920294` (Open Access, CC-BY-NC-4.0) —
@@ -212,16 +228,18 @@ The domain-gap problem shrinks rather than grows.
 
 ## Open questions — status as of 2026-07-29
 
-> Q1 is **still open and now matters more than it did**, because Chemlex is the paper's anchor result.
-> Q2–Q3 are moot (those datasets were not adopted / the HiTEA slice was used as-is and its small n is
-> reported honestly). Q4 folds into the general condition-scope argument.
+> Q1 is **RESOLVED** (2026-07-29) — and the answer was favourable. Q2–Q3 are moot (those datasets were
+> not adopted / the HiTEA slice was used as-is and its small n is reported honestly). Q4 folds into the
+> general condition-scope argument.
 
-1. ⚠️ **STILL OPEN — Chemlex:** exact count/fraction of genuinely *measured* sub-20% failures,
-   separated from the ~5,600 rule-designed synthetic negatives. Determines whether (b) is "real"
-   enough. **A reviewer will ask this**: if a large share of the test negatives were never run in a
-   lab, then "beats the in-domain ceiling" is partly a statement about agreement with a rule set
-   rather than with experiment. Resolve before submission — either quantify the measured subset and
-   re-report the headline on it alone, or state the limitation explicitly.
+1. ✅ **RESOLVED — Chemlex negatives are measured.** All 11,669 rows carry a measured LC-MS
+   conversion (0 nulls, 3,305 distinct non-zero values); 82.4 % of the negatives are a hard 0.00.
+   Nothing was labelled by rule. **The residual caveat is selection bias, not label fabrication:**
+   the negative class was deliberately enriched with expert-rule "likely-fail" designs (steric /
+   weak-nucleophile), so it over-represents obvious failure modes and the headline AUC may be
+   optimistic relative to a randomly sampled substrate matrix. State this as a limitation; it is a
+   far weaker objection than fabricated labels, and the prospective random-vs-model plate is not
+   subject to it at all.
 2. **AstraZeneca ELN:** is 39.9% "no product" truly measured or missing-not-failed, and is the
    781-reaction file actually downloadable? (Both left unresolved/refuted.)
 3. **HiTEA:** is the 29-pair BH slice diverse enough alone, or must we pool the broader multi-class
