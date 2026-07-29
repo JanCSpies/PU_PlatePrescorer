@@ -1,5 +1,14 @@
 # Results — literature-only BH C–N feasibility transfer to JnJ
 
+> **Scope note (2026-07-29).** This page documents the **JnJ/BH** line of work. It is retained as
+> methodological context — the domain-shortcut diagnosis below is the reason the rest of the project
+> is built the way it is — but it is **no longer the headline result.** The JnJ gain is *transductive*
+> and collapses to 0.40 under an inductive test, and JnJ is adversarially OOD by construction.
+> The project's anchor result is the **Chemlex amide** experiment, which holds inductively and beats
+> the in-domain supervised ceiling: see `CLAUDE.md` §2 and `LAB_JOURNAL.md` (2026-07-10).
+> Project charter and current direction: `CLAUDE.md`; the pivot is recorded in
+> `docs/decisions/008-refocus-to-publication.md`.
+
 > Predicting **Buchwald–Hartwig C–N coupling feasibility** on the held-out **JnJ HTE 2024** plate,
 > training on **literature/external data only** (no JnJ labels), via domain-adapted Positive-Unlabeled
 > learning. All numbers are under the frozen anti-cheat protocol (`src/bhpu/eval/protocol.py`):

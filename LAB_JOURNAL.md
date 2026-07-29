@@ -18,6 +18,58 @@
 
 ---
 
+## 2026-07-29 — PROJECT REFOCUS: hackathon retired, this is now a publication project — Jan's session (claude) [branch main]
+
+**Context:** Jan (human) — the hackathon is over and **the results were not submitted**. The work is
+being restarted as a PhD publication project targeting **JACS or higher**, built on the preliminary
+results, **especially Chemlex**. Everything below the line in this journal predates that decision;
+none of it is retracted, only re-framed.
+
+**The new thesis:** PU learning on **real literature positives** + a **virtual unlabeled substrate
+space** raises **HTE plate hit rates** — including for reaction classes where **no HTE dataset
+exists**. Direct-to-biology is the sharpest application: crude mixtures go straight to assay, so
+synthetic hit rate converts one-for-one into assayable compounds per plate.
+
+**Novelty vs PAYN** (*JACS* 2026, 148, 15066–15075, DOI 10.1021/jacs.6c00127): PAYN demonstrated PU
+learning with **synthetic** P and U, subsampled from existing HTE datasets under a known, imposed
+bias. Here both are real — literature P with genuine unmodelled reporting bias, and an in-silico
+enumerated U — and the method therefore applies where **no HTE data exists at all**, which is exactly
+when it is needed. That is the paper.
+
+**Why Chemlex is the anchor:** it is the one result that holds **inductively** (test substrates
+removed from U, both substrates unseen) and beats the in-domain supervised ceiling —
+PU 0.768 > true 0.733 > positives-only 0.671 > random 0.500; top-25 % plate hit rate 61.8 % vs 35.5 %
+(1.74×). The JnJ/BH line of work does not survive the inductive test (0.40) and is demoted from
+headline to methodological context.
+
+**What I did (docs only, no science touched):**
+- Rewrote `CLAUDE.md` as the new charter (thesis, PAYN-delta table, validation hierarchy, wet-lab
+  experiment design, licensing discipline for publishable vs Pistachio-derived data).
+- Rewrote `README.md` around the new framing.
+- New `docs/decisions/008-refocus-to-publication.md` recording the pivot and what was deleted.
+- Deleted pure event logistics / superseded plans: `rules.md`, `registration.md`, `SUBMISSION.md`,
+  `AUTONOMOUS_RUN.md`, `BATTLEPLAN.md`, `JSP_WORKPLAN.md` (all recoverable from git history).
+- Promoted `PROSPECTIVE_PLATE_PLAN.md` + `PROSPECTIVE_REACTION_CONDITION_GROUPING.md` from optional
+  follow-ups to the critical path.
+
+**Interpretation / decision:** The remaining gap to a JACS-level claim is **prospective**. The core
+experiment is a wet-lab HTE plate: **model-picked vs random** substrate selections, run under
+**literature conditions** (fixed and general — the model predicts substrate-intrinsic feasibility, so
+conditions must not be re-optimised per substrate), on a class with **no literature HTE dataset**.
+Model and scores get frozen and committed *before* any well is run — pre-registration is what makes
+model-vs-random a real test rather than a story told afterwards.
+
+**Explicitly not claimed:** generality. One class won (amide); BH reached 0.709 with wide CIs, and
+`prop_ips` flipped sign between the two (+0.024 → −0.033). Establishing generality is the *purpose*
+of the prospective work, not a premise of it. Reviewers will go straight at this.
+
+**Next:** (1) build the reaction-class × condition-cluster catalogue to pick the target class —
+needs strong literature signal, **no existing HTE dataset**, cheap stable in-house stock;
+(2) freeze model + scores; (3) run the plates; (4) draft — Fig. 1 the Chemlex ceiling-beating panel,
+Fig. 2 the prospective plate.
+
+---
+
 ## 2026-07-13 — Plain-language explainer PDF (teaching doc for non-PU-experts) — Jan's session (claude) [branch JSP-dataset-switch]
 
 **Context:** Florian asked for a self-contained, out-of-domain-friendly explainer of the whole

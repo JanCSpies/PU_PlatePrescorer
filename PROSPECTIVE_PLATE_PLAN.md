@@ -1,7 +1,19 @@
 # Prospective Plate Plan — scan ORD/Pistachio for new reaction classes, then run a best-vs-random 96-well plate
 
-> **Status:** plan / handoff doc, 2026-07-11 (Jan's session, claude). Decision NOT yet made — this
-> is the runway for post-hackathon work.
+> **Status: ACTIVE — this is the paper's core experiment.** Promoted 2026-07-29 from optional
+> follow-up to critical path (see `docs/decisions/008-refocus-to-publication.md`). Originally written
+> 2026-07-11 as post-hackathon runway; the hackathon was retired without submission and the project is
+> now a publication track targeting JACS or higher.
+>
+> ⚠️ **One design criterion changed and it bears on §1.** The paper's claim is that the method works
+> for reaction classes with **no existing HTE dataset** — that is the situation where plate
+> pre-scoring is actually needed, and it is the sharpest differentiator from PAYN. Suzuki–Miyaura,
+> proposed below as the first target, **has** public HTE datasets (Perera 2018, Reizman/Jensen). That
+> makes it the *safest* choice — an external yardstick exists — but the *weakest* demonstration of the
+> central claim. Resolve deliberately before committing plate capacity: either run Suzuki first as a
+> de-risking rehearsal and a class with no HTE data as the headline, or go straight to the latter.
+> Everything else in this plan (best-vs-random-vs-worst, frozen scores, literature conditions) is
+> unchanged and applies either way.
 > **Purpose:** convert our *offline* result ("literature-only PU pre-scorer beats random/positives-
 > only on held-out HTE sets") into a *prospective* wet-lab result ("we ranked a real substrate matrix,
 > ran the top-96 and a random-96, and the model's plate had a materially higher hit rate").

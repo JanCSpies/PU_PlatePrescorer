@@ -1,169 +1,217 @@
-# CLAUDE.md — Project charter & shared working agreement
+# CLAUDE.md — Project charter & working agreement
 
-> **This file is auto-loaded into every Claude Code session in this directory.**
-> It is the shared brain for **two humans and their two Claude Code sessions**
-> working in the same directory. Keep it accurate and concise. Detailed,
-> fast-changing information lives in `LAB_JOURNAL.md` and `docs/` — link, don't inline.
+> **Auto-loaded into every Claude Code session in this directory.** Keep it accurate and concise.
+> Fast-moving detail lives in `LAB_JOURNAL.md` and `docs/` — link, don't inline.
 
 ---
 
-## 1. What we are building
+## 1. What this project is
 
-**Built with Claude: Life Sciences** hackathon (Research track), Glorius group, University of Münster.
-Team: **Florian Boser** + **Prof. Frank Glorius** (2 people, 2 Claude Code sessions, shared dir).
+**PU_PlatePrescorer** — a publication-track research project by **Jan Christopher Spies**
+(PhD student, Glorius group, Organisch-Chemisches Institut, University of Münster).
 
-**Scientific goal (one line):** Predict the **feasibility** of **Buchwald–Hartwig (BH) C–N
-cross-couplings** using only **literature reaction data**, framed as **Positive-Unlabeled (PU)
-learning**, and evaluate on a held-out HTE well-plate dataset.
+**Target:** a full paper in **JACS or higher**.
 
-**Why it matters:** Exploratory HTE and direct-to-biology plates waste capacity on wells that
-simply fail. A feasibility model trained on (biased, positive-only) literature data can pre-score
-a large substrate matrix, so we design higher-hit-rate plates → more real, testable small
-molecules per plate → faster small-molecule drug discovery.
+**Thesis (one sentence):** Positive-Unlabeled learning on **real literature reaction data**,
+combined with a **virtual (in-silico enumerated) unlabeled substrate space**, pre-scores an HTE
+substrate matrix well enough to **raise the plate hit rate** — including for reaction classes where
+**no HTE dataset exists**, which is where plate pre-scoring is actually needed.
 
-### The pipeline (target design)
-1. **Test set** = `JNJ HTE 2024` (Neves et al., *Robust OOD prediction of BH reactions*). We
-   predict its feasibility (react / no-react). Optionally carve a validation split from it.
-2. **Unlabeled set** = the **full combinatorial substrate space** (aryl × amine, under general
-   conditions), *excluding* the test reactions. Treated as U in PU learning.
-3. **Positives** = mined from **multiple literature sources** (see §4). We **benchmark data
-   sources against each other**, always guarding against leakage into val/test.
-4. **PU learning** recovers reliable negatives / propensity and trains a feasibility classifier.
-   We **benchmark PU strategies** and the **final model**.
-5. Feasibility scores → **plate-design** objective → (vision) **direct-to-biology**.
+**Why it matters.** Exploratory HTE and especially **direct-to-biology (D2B)** campaigns spend plate
+capacity on wells that simply fail. A failed well costs the same as a successful one but yields no
+testable compound. If feasibility can be predicted *before* the plate is laid out — from literature
+alone, with no prior HTE data for that reaction class — then every campaign in that class starts
+from a better plate. In D2B, where crude reaction mixtures go straight into a biological assay,
+a higher synthetic hit rate converts directly into more real, assayable compounds per plate.
 
-### Anchoring methods (our group's prior work — reused as *ideas*, re-implemented from scratch this week)
-- **TACIT** — reaction *outcome/feasibility* from **positive-only** data via "implicit negatives"
-  (under revision, *Nat. Mach. Intell.*). Can predict "no reaction".
-- **PAYN** — reaction *yield* from biased positive-only data via **spy-based PU learning** under
-  the **SCAR** assumption (*JACS* 2026). A frontier of this project is going **beyond SCAR**
-  (see `literature/Beyond_SCAR/`, and PU-generative methods in `literature/Diffusion_FlowMatching__PU/`,
-  `literature/GAN_PU/`).
+### Relation to prior group work (this is the novelty argument)
 
-> **Hackathon rule:** all analysis/code must be produced **during the event** (Jul 7–13, 2026).
-> Starting from an existing question + public datasets is allowed; reusing prior code is not.
-> Everything submitted must be **open-sourced**. Submission = 3-min demo video + repo/write-up +
-> 100–200-word summary, due **Mon Jul 13, 9:00 PM ET**.
+- **PAYN** — *"Positivity is All You Need": Yield Prediction of Organic Reactions in Biased Data Sets
+  via Positive-Unlabeled Learning.* **J. Am. Chem. Soc. 2026, 148, 15066–15075.**
+  DOI [10.1021/jacs.6c00127](https://doi.org/10.1021/jacs.6c00127) ·
+  code <https://github.com/GloriusGroup/PAYN>
+- **TACIT** — reaction outcome/feasibility from positive-only data via implicit negatives
+  (under revision, *Nat. Mach. Intell.*).
 
----
+PAYN established that PU learning recovers usable negatives from biased positive-heavy data — but
+its **P and U were synthetic**, carved out of existing HTE datasets by biased subsampling. That is a
+proof of principle under a controlled bias, not a demonstration that the method works on the bias
+chemistry actually has.
 
-## 2. How we collaborate (READ THIS)
+**This project's contribution is the step PAYN did not take:**
 
-Two Claude Code sessions edit these files **live**. To avoid clobbering each other:
+| | PAYN (JACS 2026) | **PU_PlatePrescorer (this work)** |
+|---|---|---|
+| Positives **P** | synthetic — biased subsample of an HTE set | **real literature reactions** (ORD / Pistachio / USPTO) |
+| Unlabeled **U** | the held-out remainder of the same HTE set | **virtual** — enumerated combinatorial substrate grid |
+| Bias model | imposed, known | **real reporting bias**, unknown and unmodelled |
+| Task | yield regression | **feasibility → plate design** |
+| Validation | retrospective | retrospective **+ prospective wet-lab HTE** |
+| Applies to | classes with an HTE dataset | **classes with no HTE dataset at all** |
 
-- **`LAB_JOURNAL.md` is append-only.** Add a new dated, author-tagged entry at the *top* of the
-  log; never rewrite someone else's entry. Record every experiment (what/why/result/next).
-- **Decisions** go in their own file under `docs/decisions/NNN-title.md` (one per decision) — not
-  edited in place by others, so no merge races.
-- **Literature notes** live in `docs/literature/notes/<prefix>-<slug>.md`, one file per paper.
-- **Per-user Claude memory (`~/.claude/.../memory/`) is NOT shared** between the two of us. Any
-  knowledge the *other* human/agent needs must be written **into this repo** (here, LAB_JOURNAL,
-  or docs/), never only into personal memory.
-- Before starting a work item, glance at `LAB_JOURNAL.md` (latest entries) and open tasks so you
-  don't duplicate the other session. Tag your journal entries with your name.
-- Prefer small, self-contained modules and scripts so parallel work rarely touches the same file.
+The last row is the point. A method that needs an existing HTE dataset cannot help you on a
+reaction where you have none — which is exactly when you would want it.
 
 ---
 
-## 3. Coding standards (non-negotiable)
+## 2. Preliminary result that motivates the paper
 
-- **Package manager: `uv`.** Never call bare `pip`/`python`. Use `uv run python ...`,
-  `uv add <pkg>`, `uv sync`.
-- **Python 3.13** (see `pyproject.toml`, `requires-python >=3.13`).
-- **Object-oriented, typed, documented.** Full type annotations on every function/method;
-  **Google-style docstrings**; explanatory comments for non-obvious logic. Prefer classes and
-  clear interfaces over loose scripts; `scripts/` holds only thin CLI entrypoints that call into
-  `src/bhpu/`.
-- **Lint/format/type-check:** `uv run ruff check .`, `uv run ruff format .`, `uv run mypy src`.
-  Ruff is configured for the Google docstring convention and to require annotations.
-- **Reproducibility:** raw data is immutable; derived data is regenerated by scripts and carries a
-  provenance record (see `datasets/processed/split_report.json`). Fix random seeds. No secrets in
-  the repo.
+**Chemlex amide coupling.** P = 258,645 literature amide pairs mined from ORD + Pistachio;
+U = virtual 272 × 231 substrate grid (62,832 pairs); TEST = 2,234 held-out reactions, 35.5 % feasible.
+**Both test substrates unseen** (inductive — test substrates removed from U). Zero target labels ever
+used in training.
+
+| ranking model | TEST ROC-AUC | AP |
+|---|---|---|
+| random | 0.500 | 0.355 |
+| positives-only (similarity to 258k known positives) | 0.671 | 0.507 |
+| **literature-PU — ours (zero target labels)** | **0.768** | **0.621** |
+| in-domain supervised ceiling (trained on *real* Chemlex labels) | 0.733 | — |
+
+Plate hit rate, top 25 % of the ranked matrix: **61.8 %** vs **35.5 %** random — a **1.74×** uplift.
+
+Two things make this publishable rather than incremental:
+
+1. **The literature-PU model beats the in-domain supervised ceiling** trained on real labels for that
+   very dataset. 258k diverse literature positives out-signal 4,960 in-domain rows once the test
+   substrates are novel. In PAYN the PU model sits *between* the positives-only and true-label
+   references; here it tops both.
+2. **Beating positives-only by +0.097 AUC shows the virtual U carries real signal** — the model is
+   not merely saying "this looks like a reaction someone already ran".
+
+**Honest limits (these define the remaining work).** This is one reaction class. The same pipeline on
+HiTEA Buchwald–Hartwig reached only 0.709 (n = 36, wide CIs), and the beyond-SCAR `prop_ips` variant
+that won on amide (+0.024) **lost** on BH (−0.033) — so the method's advantage is not yet shown to be
+general, and no claim of generality should be made from Chemlex alone. See `LAB_JOURNAL.md`
+(2026-07-10 through 2026-07-13) and `RESULTS.md`.
 
 ---
 
-## 4. Data map
+## 3. The plan to a JACS-level paper
+
+**The gap:** retrospective evidence on public datasets, however clean, is a benchmark result. What
+elevates it is showing the model works **prospectively, on a reaction class with no HTE data**, in a
+real plate.
+
+**Validation hierarchy** — each tier is a stronger claim than the last:
+
+```
+validation split (optimise freely)
+  → held-out public HTE test, touched once (Chemlex ✅, HiTEA ✅)
+    → PROSPECTIVE WET-LAB HTE PLATE          ← the paper's core experiment
+```
+
+**Core experiment (wet lab, Jan).** For a reaction class where **no literature HTE dataset exists**:
+1. Enumerate the virtual substrate matrix from real in-house building-block stock.
+2. Mine literature positives **P** for that class; score the matrix with the literature-PU model.
+3. Run **model-picked vs random** substrate selections on plate, **under literature conditions**
+   (conditions taken from the mined literature consensus, not re-optimised per substrate — the
+   model predicts substrate-intrinsic feasibility, so the conditions must be held fixed and general).
+4. Report the hit-rate difference. A worst-picked arm, if capacity allows, brackets the effect and
+   guards against "the model just picked easy chemistry".
+
+**Why random is the right control:** it is what a chemist without the model actually does when
+laying out an exploratory plate. Model-vs-random *is* the claim.
+
+**Design notes that protect the result:** substrate selections must be structurally disjoint where
+possible; the model is frozen and scores committed **before** any well is run (pre-registration in
+the lab notebook); plate position/edge effects randomised across arms.
+
+**Open scientific questions to resolve on the way:**
+- Which reaction classes have enough literature signal? (`PROSPECTIVE_REACTION_CONDITION_GROUPING.md`)
+- Does the amide result generalise, or is it class-specific? (the HiTEA discrepancy says: not yet known)
+- Does conditioning on a literature-consensus condition cluster beat a single fixed condition set?
+- Is the SCAR assumption the binding constraint, and do beyond-SCAR methods help reliably? (so far: no)
+
+---
+
+## 4. Working agreement
+
+- **`LAB_JOURNAL.md` is append-only.** New dated, author-tagged entry at the *top*. Never rewrite an
+  existing entry. Log every experiment: context/hypothesis → what I did → result → interpretation → next.
+  This is the record a paper's SI is reconstructed from; treat it as a lab notebook, because it is one.
+- **Decisions** get their own file: `docs/decisions/NNN-title.md` (ADR-style).
+- **Literature notes:** one file per paper in `docs/literature/notes/<prefix>-<slug>.md`.
+- **Negative results are recorded, not discarded.** The prop_ips-fails-on-BH entry is exactly as
+  valuable as the win — it is what keeps the paper's claims defensible under review.
+- **Never tune on TEST.** Model selection on validation only; test touched once. Any result produced
+  by changing evaluation after seeing a score is not a result.
+- Personal Claude memory is *not* shared with collaborators — anything a collaborator needs goes in
+  this repo.
+
+**Provenance.** This repo was split from a shared Glorius-group working tree; the foundational
+commits are by **Florian Boser** and remain attributed to him in `git log`. The earlier work was done
+during a hackathon that was **not submitted**; that framing is retired and no longer applies. What
+carries forward is the science, not the event.
+
+---
+
+## 5. Coding standards (non-negotiable)
+
+- **Package manager: `uv`.** Never bare `pip`/`python`. Use `uv run python ...`, `uv add`, `uv sync`.
+- **Python 3.13** (`pyproject.toml`, `requires-python >=3.13`).
+- **Object-oriented, typed, documented.** Full annotations; **Google-style docstrings**; comments for
+  non-obvious logic. `scripts/` and `scripts_JSP/` hold thin CLI entrypoints that call into `src/`.
+- **Quality gates:** `uv run ruff check . && uv run ruff format . && uv run mypy src && uv run pytest`
+- **Reproducibility:** raw data immutable; derived data regenerated by scripts with a provenance
+  record; fixed seeds; no secrets. Every number in `LAB_JOURNAL.md` must trace to a file in `artifacts/`.
+
+---
+
+## 6. Data map
 
 | Path | What it is |
 |---|---|
-| `datasets/raw/BH_HTE_Curated_Dataset_v20260219.csv` | **Immutable** source. 27,497 BH C–N reactions, 8 sources, binary `labels` (feasible=1) + `Yield`. |
-| `datasets/processed/test_jnj_hte_2024.*` | **Test set** — `JNJ HTE 2024` (11,328 rows; 110 aryl × 68 amine, 888/7480 pairs measured; 32 cat / 8 base / 6 solv; label 0/1 = 6896/4432). |
-| `datasets/processed/literature_hte.*` | **Literature-HTE positives/unlabeled** — Merck 2025, Roche 2023, HiTEA 2024, Dreher 2014/2016, AZ ELN 2023 (11,857 rows). |
-| `datasets/processed/dropped_ahneman_dreher_doyle_2018.*` | **Dropped** — Ahneman et al. *Science* 2018 (4,312 rows), kept only for transparency. |
+| `datasets/raw/HiTEA`, `datasets/raw/Chemlex` | **Immutable** source HTE datasets (36 MB). Not in git — irreplaceable, back up separately. |
+| `datasets/processed/amide_corpus_ord.*` | Amide positives mined from ORD + ORDerly — 194,625 detected → 52,968 unique pairs. **Open-licensed**, publishable. |
+| `datasets/processed/private/` | **Pistachio / CHORISO / USPTO / ORDerly parsed corpora (597 MB). LICENSED — never commit, never publish.** |
+| `datasets/processed/features/` | Feature caches (ECFP/DRFP, ZINC availability). Regenerable. |
+| `final_datasets/` | Assembled TEST / P / U. `final_datasets/private/` is licensed — never publish. |
+| `artifacts/` | Experiment outputs — **tracked in git** (~2 MB); every journal number traces here. |
 
-**Why Ahneman is dropped:** `Source == "Dreher Doyle 2018"` is the Ahneman isoxazole-**additive**
-screen (15 aryl × 1 amine × 4 ligand × 3 base × 23 additives). It is the *only* additive-bearing
-source, but the curated file has **no additive-identity column** — 23 additive experiments collapse
-to identical featurisations with different yields. Irreducibly ambiguous → removed. See
-`docs/decisions/001-drop-ahneman.md`.
+> ⚠️ **`DRFP`/`QM` columns in the original curated CSV are truncated NumPy string reprs** — not usable
+> as features. Recompute DRFP from SMILES; RDKit for descriptors. See `docs/datasets.md`.
 
-> ⚠️ **`DRFP` and `QM` columns in the raw CSV are truncated NumPy string reprs** (e.g.
-> `"[0 1 1 ... 1 0 0]"`) — **not usable as features**. Recompute DRFP from SMILES with the `drfp`
-> package and QM/descriptors from RDKit. See `docs/datasets.md`.
-
-**Literature data sources to mine as positives** (benchmarked against each other): the bundled
-literature-HTE sources above; a **Cernak ~50k C–N coupling** dataset; **Open Reaction Database
-(ORD)**; **Pistachio**; **USPTO**; **Reaxys/SciFinder** (Florian has Münster access). Provenance,
-sizes, licenses, and leakage risk are catalogued in `docs/literature/notes/data-sources-catalog.md`.
+**Licensing discipline matters for publication:** results derived from Pistachio can be *reported*,
+but the corpus cannot be redistributed. Anything that must ship with the paper has to be reproducible
+from **ORD/ORDerly/USPTO (open)** — which is why `amide_corpus_ord.*` is kept separate from `private/`.
 
 ---
 
-## 5. Environment & commands
+## 7. Directory layout
 
-```bash
-uv sync --extra dev                       # build/refresh the environment
-uv run python scripts/01_split_raw_dataset.py   # regenerate processed splits
-uv run ruff check . && uv run mypy src    # quality gates
 ```
-PDF text extraction for literature work: the base interpreter `/opt/miniconda/bin/python3` has
-PyMuPDF (`import fitz`); use it read-only for reading PDFs (don't add it to the project env).
+CLAUDE.md                 # this charter
+LAB_JOURNAL.md            # append-only experiment log (the lab notebook)
+RESULTS.md                # consolidated retrospective results
+PROSPECTIVE_PLATE_PLAN.md # ← the wet-lab validation experiment (paper's core)
+PROSPECTIVE_REACTION_CONDITION_GROUPING.md  # picking the reaction class + condition cluster
+Future_datasets.md        # candidate public test sets
+src/pubench/              # PU benchmark: models, features, mining, eval  (primary)
+src/bhpu/                 # earlier pipeline: chem, features, leakage, space  (foundational)
+scripts_JSP/              # CLI entrypoints + SLURM sbatch files
+artifacts/                # experiment outputs (tracked)
+docs/decisions/           # ADRs
+docs/literature/notes/    # one note per paper (25)
+```
+
+**SLURM:** heavy compute goes to the cluster at `--nice=1000000`. See `docs/slurm.md`.
 
 ---
 
-## 6. Directory layout
+## 8. Current status
 
-```
-CLAUDE.md            # this file (shared charter)
-LAB_JOURNAL.md       # append-only experiment log (humans + agents)
-pyproject.toml       # uv project + tooling config (ruff google-docstrings, mypy strict)
-src/bhpu/            # installable, typed, OOP package
-  data/              #   schema constants + RawDatasetSplitter
-  chem/              #   RDKit canonicalisation + BH product generation
-  features/          #   ECFP / DRFP / condition one-hot / composite featurisers
-  leakage/           #   LeakageAuditor (substrate/pair overlap vs test)
-  space/             #   CombinatorialSpaceGenerator (unlabeled grid)
-  models/            #   FeasibilityModel: CatBoost (core), TabPFN/ChemProp (extras)
-  pu/                #   PU learners: SpyPULearner, BaggingPULearner
-  eval/              #   NevesFoldReader, feasibility_metrics, plate hit-rate uplift
-scripts/             # thin CLI entrypoints: 01_split_raw_dataset, 02_run_pu_baseline
-tests/               # pytest suite (synthetic data; fast)
-datasets/raw/        # immutable source data (Neves/, Cernak/, ORD/, Pistachio/)
-datasets/processed/  # regenerated splits + provenance
-artifacts/           # experiment outputs (gitignored)
-docs/
-  datasets.md        # data provenance & caveats
-  decisions/         # one file per decision (ADR-style)
-  literature/notes/  # one note per paper (23 notes)
-  literature/SYNTHESIS.md  # merged literature synthesis
-literature/          # source PDFs (+ topical subfolders)
-LITERATURE_REVIEW.md # earlier broad review (pre-project-sharpening; superseded by docs/literature/)
-```
+**Phase: retrospective evidence secured; moving to prospective validation.**
 
-**Model extras:** `uv sync --extra models` installs TabPFN + ChemProp (Torch-backed);
-core CPU pipeline runs without them. Quality gates: `uv run ruff check . && uv run mypy src scripts &&
-uv run pytest`.
+Done — literature-PU pipeline (mining → virtual U → features → PU models → frozen eval), 9 PU methods
+benchmarked, Chemlex amide win over the in-domain ceiling, HiTEA BH replication, leakage audits,
+beyond-SCAR arm (negative result).
 
----
-
-## 7. Current status
-
-See the top of `LAB_JOURNAL.md` for the latest. Done: scaffolding, dataset split, literature deep
-dive, full pipeline (features/leakage/space/models/PU/eval), tests, and a **SLURM benchmark**.
-Headline result: **bagging PU ≫ spy** (ROC-AUC ~0.90 vs ~0.86, far more stable) on within-JnJ
-recovery; supervised OOD bar (40 Neves folds, DRFP2048) = 0.837. **Open challenge:** cross-domain
-literature→JnJ transfer is still ~random — the core research problem for the week. Next: PU with a
-combinatorial-grid U + propensity weighting; Optuna tuning; TabPFN/ChemProp arms on the GPU partition;
-plate-design demo by scoring the unlabeled grid with the winning bagging model.
-
-**SLURM:** compute is offloaded to the cluster at `--nice=1000000` (colleagues preempt us). See
-`docs/slurm.md`. Cached features live in `datasets/processed/features/`.
+Next, in order:
+1. **Pick the reaction class** for the wet-lab plate — needs the ORD/Pistachio/USPTO class × condition
+   catalogue (`PROSPECTIVE_REACTION_CONDITION_GROUPING.md`). Requirement: strong literature signal,
+   **no existing HTE dataset**, cheap stable stock.
+2. **Freeze and commit** model + scores before running anything.
+3. **Run model-picked vs random plates** under literature conditions.
+4. **Draft.** Figure 1 = the Chemlex "beats the in-domain ceiling" panel; Figure 2 = the prospective
+   plate result. Target JACS.
