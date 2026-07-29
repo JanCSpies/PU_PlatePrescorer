@@ -18,6 +18,59 @@
 
 ---
 
+## 2026-07-29 — CORRECTION: Chemlex negatives ARE measured — the "rule-designed" claim was wrong — Jan's session (claude) [branch main]
+
+**Context/Hypothesis:** Jan (human) asked what "chemist rule-designed" actually meant. The claim had
+been sitting in `Future_datasets.md` since 2026-07-09 — "~5,600 of the negatives (~48 % of rows) are
+**chemist-rule-designed synthetic (never lab-run)**" — and earlier today I had escalated it to a
+submission-blocking caveat on the grounds that a headline computed against fabricated labels would
+not survive review. Chemlex is now the paper's anchor result, so the claim had to be settled, not
+repeated.
+
+**What I did:** Traced it to source instead of propagating it. (1) Read our own note on the paper,
+`docs/literature/notes/bh-zhong-feasibility-robustness.md` (Zhong et al., *Nat. Commun.* 2025, 16,
+4522) — which says the ~5,600 are "deliberately-**designed** likely-negatives (steric/nucleophilicity
+expert rules)", i.e. a statement about *design*, not about *labelling*, and separately notes the
+paper's "surprising" reactions (expert-predicted-negative, came back high-yield). (2) Verified
+directly against the raw deposit `datasets/raw/Chemlex/Chemlex_Acidamine_Wetlab_Data.xlsx`.
+
+**Result (raw file, 11,669 × 9):**
+| check | value |
+|---|---|
+| rows with a measured `Conversion` | **11,669 / 11,669**, 0 nulls |
+| distinct non-zero conversion values | 3,305 (41.09, 54.66, 86.75 … — instrument readouts) |
+| at the paper's 20 % threshold | 3,055 feasible (26.2 %) / 8,614 infeasible (73.8 %) |
+| negatives that are a hard measured 0.00 | 7,100 → **82.4 % of all negatives** |
+
+Every reaction was physically run (200–300 µL, 156 instrument-hours, LC-MS UV). No label is
+rule-assigned. The "surprising" high-yield hits among expert-predicted-negatives are themselves proof
+the designed subset was executed — you cannot discover them any other way.
+
+**Interpretation / decision:** **The claim was wrong and is retracted.** It conflated *how reactions
+were selected onto the plate* with *how their labels were assigned*. The expert rules chose ~5,600
+likely-failing pairs (steric hindrance, weak nucleophilicity) **to run**, so the dataset would be
+negative-rich — sampling only literature-plausible pairs gives a near-all-positive set that teaches
+nothing about failure. That is sound experimental design, not label fabrication.
+
+**The residual caveat is real but much weaker: selection bias.** The negative class is *enriched for
+chemically obvious failure modes* rather than randomly sampled, so a model can score partly by
+learning "bulky acid + weak nucleophile → fails". Consequence to state as a limitation: **0.768 may
+be optimistic relative to a randomly sampled substrate matrix**, where failures are subtler. It is
+*not* a threat to validity — both our model and the in-domain ceiling are scored against the same
+measured experimental outcomes, so the "beats the ceiling" comparison stands.
+
+**Bearing on the project:** this *strengthens* the case for the prospective plate rather than
+weakening it. A **random** arm samples the matrix as it actually is, with no expert-rule enrichment,
+so the wet-lab experiment directly answers the one question Chemlex structurally cannot.
+
+**Next:** `Future_datasets.md` corrected in four places (summary table, candidate card, shortlist row,
+open-question Q1 → RESOLVED) — commit `5de2b03`. Carry the selection-bias limitation into the
+manuscript's limitations paragraph rather than the caveats-to-resolve list. **Lesson for this
+journal: a claim inherited from the deep-research harness is a lead, not a fact — check it against
+the raw deposit before it hardens into a project assumption.**
+
+---
+
 ## 2026-07-29 — PROJECT REFOCUS: hackathon retired, this is now a publication project — Jan's session (claude) [branch main]
 
 **Context:** Jan (human) — the hackathon is over and **the results were not submitted**. The work is
