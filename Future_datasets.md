@@ -18,7 +18,7 @@
 > | **HiTEA BH** | ✅ used — but the BH slice is only **29 distinct substrate pairs** (→ our n=36 test, CIs so wide the result barely constrains anything) |
 > | LSF borylation | mono-molecular (40 substrates), not a substrate-pair matrix |
 > | Jaman SNAr | ~192 pairs, readout is a semiquantitative MS threshold, not yield |
-> | AstraZeneca ELN BH | negatives **refuted** — "no product" is likely missing-not-failed |
+> | AstraZeneca ELN BH | negatives **refuted** — "no product" is likely missing-not-failed. *(Structures are fine and we hold 750 rows — it is used as **P**. Only its use as a test set is rejected.)* |
 > | AbbVie Suzuki | 23k diverse products, but **structures redacted** — no SMILES, cannot featurise |
 > | RSC 2025 amide | 632 pairs, but (b) and (c) never verified |
 >
@@ -71,7 +71,7 @@ natural-conditions HTE sets (below) beat JnJ on (c) without losing (b).
 | 2 | **Pfizer HiTEA "reactome"** | **BH** + Ullmann + 2× hydrogenation | ⚠️ full corpus diverse; **BH slice 29 distinct pairs (wide-but-shallow)** | ✅✅ genuinely measured 0% yields | ✅✅ ~10 yr real pharma HTE | ✅ GitHub, CC-BY |
 | 3 | **ETH/Roche LSF borylation** | C–H borylation | ⚠️ 40 substrates (mono-molecular, not a pair matrix) | ✅ LCMS success/fail, authentic negatives | ✅✅ **only candidate verified on all 3** | ✅ GitHub |
 | 4 | **Jaman SNAr** | SNAr (amine + aryl halide) | ✅ ~192 pairs (16 amines × 13 halides) | ✅ measured, majority fail | ⚠️ semiquantitative MS threshold | ✅ via PMC |
-| — | AstraZeneca ELN BH | BH | ✅ 340 aryl × 260 amines | ❌ **REFUTED — likely missing-not-failed** | ✅ natural ELN | ⚠️ contested |
+| — | AstraZeneca ELN BH | BH | ✅ 340 aryl × 260 amines | ❌ **REFUTED — likely missing-not-failed** | ✅ natural ELN | ✅ **held: 750 rows w/ SMILES** (used as P, not as test) |
 | — | AbbVie 15-yr Suzuki | Suzuki | ✅ 23k products | ✅ isolated yields | ✅ med-chem parallel libs | ❌ **structures redacted** |
 | — | RSC 2025 amide | Amide coupling | ✅ 632 pairs (70 amines × 66 acids) | ❓ unverified | ❓ unverified | ✅ open-access |
 
@@ -169,17 +169,37 @@ natural-conditions HTE sets (below) beat JnJ on (c) without losing (b).
 
 ## Rejected / trap candidates (do NOT use as-is)
 
-### AstraZeneca ELN Buchwald–Hartwig (Chem. Sci. 2023) — *the biggest trap*
+### AstraZeneca ELN Buchwald–Hartwig (Chem. Sci. 2023) — *rejected as a TEST set only; we do use it as P*
 - Saebi et al., "On the use of real-world datasets for reaction yield prediction," *Chem. Sci.* 2023.
 - **Looks perfect:** 781 curated real ELN reactions, **340 aryl halides × 260 amines**, 24 ligands,
   15 bases, 15 solvents — a natural sparse scatter, *actual BH*. Satisfies (a) and (c) strongly.
-- **BUT (b) REFUTED (3 separate claims, votes 0-3 / 0-3 / 1-2):** the "39.9% no-product = real
-  negatives" claim was killed — for legacy ELN data, "no product recorded" is likely
-  **missing-not-failed** (same trap as CHORISO). Methods define the 39.9% as a *mixture* including
-  non-chemical, non-measured causes.
-- **Availability also contested** (GitHub `nsf-c-cas` / ORD deposit unconfirmed, vote 1-2).
-- **Verdict:** the most tempting-looking BH set, and the one most likely to silently corrupt the
-  test labels. Avoid unless the measured-failure subset can be positively confirmed.
+- **Rejected on (b):** the "39.9 % no-product = real negatives" claim was refuted — for legacy ELN
+  data, "no product recorded" is likely **missing-not-failed** (same trap as CHORISO); the Methods
+  define the 39.9 % as a *mixture* including non-chemical, non-measured causes. **This remains the
+  operative rejection reason and it is unresolved** — it cannot be settled from the data alone,
+  because it is a question about ELN provenance, not about the numbers in the file.
+
+> ✅ **CORRECTIONS 2026-07-29 — two claims in the original card were wrong.**
+>
+> **1. Structures ARE available, and we already hold them.** The "availability contested (GitHub
+> `nsf-c-cas` / ORD deposit unconfirmed)" line is stale. AZ ELN reached us by a different route —
+> the Neves curated BH file — and sits in `datasets/processed/literature_hte.parquet` today:
+> **750 rows, 296 unique aryls × 229 unique amines, 469 unique pairs**, with full `Aryl SMILES` /
+> `Amine SMILES` / `Product SMILES` / `Yield`. Labels 591 feasible / 159 infeasible; 144 rows at
+> exactly 0 yield, 588 distinct non-zero yields, no nulls.
+> *(Counts differ slightly from the paper's 781 / 340×260 — our copy came through Neves' curation,
+> which appears to have filtered. Treat the two as closely related, not proven identical.)*
+>
+> **2. "No structures" is AbbVie, not AstraZeneca.** The structure-redaction blocker belongs to the
+> **AbbVie 15-yr Suzuki** set (one-hot encoded, no SMILES) — see the card below. Easy to conflate;
+> they are different datasets with different blockers.
+>
+> **What this changes:** nothing about the rejection *as a test set* — 144 unexplained zeros are
+> exactly the rows whose reliability is in doubt, and a test set is where unreliable negatives do
+> maximum damage. **But note the asymmetry:** AZ ELN is already used as **literature positives (P)**,
+> where the missing-not-failed problem does not bite — a reaction recorded as working is evidence it
+> works, regardless of what the blanks mean. The original card's "avoid" verdict blurred *test set*
+> with *any use*. Keep it in P; keep it out of any test set.
 - **Links:** https://pubs.rsc.org/en/content/articlehtml/2023/sc/d2sc06041h
 
 ### AbbVie 15-year Suzuki parallel-library (JACS 2024) — *ideal but unusable*
