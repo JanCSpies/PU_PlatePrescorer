@@ -1,14 +1,22 @@
-# bhpu — Buchwald–Hartwig C–N feasibility from literature data via PU learning
+# PU_PlatePrescorer — reaction feasibility from literature data via PU learning
 
 Hackathon project (Glorius group, University of Münster) for **Built with Claude: Life Sciences**, Research track.
 
 **One-line goal:** Predict the *feasibility* of Buchwald–Hartwig C–N cross-couplings using only
 *literature* reaction data, framed as **Positive-Unlabeled (PU) learning**, and evaluate on a
-held-out HTE well-plate dataset (JnJ HTE 2024, from Neves et al.).
+held-out HTE well-plate dataset (JnJ HTE 2024, from Neves et al.). Feasibility scores pre-score a
+substrate matrix so plates are designed for higher hit rates.
 
 See [`CLAUDE.md`](CLAUDE.md) for the full project charter, data map, coding standards, and the
 collaboration protocol (this repo is shared live between two Claude Code sessions + two humans).
 See [`LAB_JOURNAL.md`](LAB_JOURNAL.md) for the running experiment log.
+
+## Provenance
+
+This repository was split off from the shared Glorius-group hackathon working tree. It keeps the
+full commit history, so the foundational commits remain attributed to **Florian Boser** and the
+later work to **Jan Spies**; see `git log`. The Python packages are still named `bhpu` and
+`pubench` — the rename is at the project level only, so imports and job scripts are unaffected.
 
 ## Environment
 
