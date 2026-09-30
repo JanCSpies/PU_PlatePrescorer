@@ -8,41 +8,17 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 
-# --- Large / licensed data: NOT committed (regenerated or externally sourced) ---
-# Keep the folder structure and small pointer/provenance files only.
-datasets/raw/**
-!datasets/raw/**/location.md
-datasets/processed/*.csv
-datasets/processed/*.parquet
-datasets/processed/*.npz
-datasets/processed/features/
-!datasets/processed/split_report.json
-
-# --- LICENSED-source-derived data (e.g. Pistachio): NEVER commit or publish. ---
-# Everything mined from a licensed source is written here and stays local-only.
-datasets/processed/private/
+# --- Data: NEVER committed ---
+# Raw source datasets are immutable and irreplaceable; they are backed up separately.
+datasets/raw/
+# Anything derived from a licensed source (e.g. Pistachio) goes in a private/ folder.
+# No leading slash: this matches a private/ folder at ANY depth in the repo.
+private/
 
 # --- Literature PDFs: copyrighted, do not redistribute (notes in docs/ are ours) ---
 literature/**/*.pdf
 
-# --- Model / experiment artifacts ---
-# Experiment *results* ARE tracked (~2 MB): metrics JSONs, comparison tables, the
-# eval arrays and the report/explainer PDFs. They are what LAB_JOURNAL.md cites, they
-# are the submission deliverables, and regenerating them means re-running SLURM jobs
-# that need the licensed corpora in datasets/processed/private/.
-# Whitelist, not blanket-include: anything with a new/unexpected extension (large model
-# blobs, dumps) stays ignored until deliberately added here.
-artifacts/**
-!artifacts/**/
-!artifacts/**/*.json
-!artifacts/**/*.yaml
-!artifacts/**/*.csv
-!artifacts/**/*.md
-!artifacts/**/*.npz
-!artifacts/**/*.parquet
-!artifacts/**/*.pdf
-
-# Trained-model blobs are never tracked, including under artifacts/.
+# --- Trained-model blobs: large, regenerable, never tracked ---
 *.cbm
 *.joblib
 *.pt
@@ -50,21 +26,3 @@ mlruns/
 
 # --- OS ---
 .DS_Store
-
-# SLURM job logs
-slurm/logs/*.out
-slurm/logs/*.err
-
-# Colleague's separate package (its own git repo).
-# No trailing slash: in this checkout these are *symlinks* into a collaborator's
-# home directory, and a "gpuma/" pattern would only match a real directory.
-gpuma
-
-# External upstream repos (their own git history, not tracked here)
-external
-
-# Licensed (Pistachio-derived) assembled datasets — never publish
-final_datasets/private/
-
-# SLURM job logs (JSP)
-scripts_JSP/slurm_logs/
