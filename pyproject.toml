@@ -19,7 +19,3 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.9",
 ]
-
-[tool.ruff]
-# docs/ holds notes, not project code: ruff must not reformat code snippets in them.
-extend-exclude = ["docs"]
