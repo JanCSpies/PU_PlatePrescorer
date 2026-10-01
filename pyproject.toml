@@ -24,3 +24,5 @@ dev = [
 # C90 = McCabe complexity: at most 10 paths through one function (CLAUDE.md §5).
 extend-select = ["C90"]
 mccabe.max-complexity = 10
+# Sort `import platepu...` as our own code, even for modules that do not exist yet (tests first).
+isort.known-first-party = ["platepu"]
