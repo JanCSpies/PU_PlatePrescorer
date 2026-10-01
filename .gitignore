@@ -15,6 +15,22 @@ datasets/raw/
 # No leading slash: this matches a private/ folder at ANY depth in the repo.
 private/
 
+# --- Data files, run outputs, experiments: never committed (CLAUDE.md §4) ---
+*.csv
+*.parquet
+*.tsv
+*.smi
+*.png
+*.jpg
+*.svg
+*.log
+*.ipynb
+scratch/
+# The one exception: small, hand-checked open fixtures for tests.
+!tests/data/**
+# The last matching rule wins, so private/ is repeated here: licensed data is never a fixture.
+private/
+
 # --- Literature PDFs: copyrighted, do not redistribute (notes in docs/ are ours) ---
 literature/**/*.pdf
 
@@ -22,6 +38,7 @@ literature/**/*.pdf
 *.cbm
 *.joblib
 *.pt
+*.pkl
 mlruns/
 
 # --- OS ---
