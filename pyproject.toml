@@ -19,3 +19,8 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.9",
 ]
+
+[tool.ruff.lint]
+# C90 = McCabe complexity: at most 10 paths through one function (CLAUDE.md §5).
+extend-select = ["C90"]
+mccabe.max-complexity = 10
