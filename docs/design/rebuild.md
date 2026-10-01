@@ -30,15 +30,30 @@ Facts behind this order: `Reaction Corpus Atlas` (2,000-row samples, 2026-10-01)
 | `source_id` | str | ID in that file (ORD id, patent:paragraph, row number) |
 | `licence` | str | `"open"` or `"licensed"` |
 | `reactants` | tuple[str, ...] | SMILES as given by the source |
-| `agents` | tuple[str, ...] | catalysts, reagents, solvents as given (empty if the source pools them) |
+| `agents` | tuple[str, ...] | catalysts and reagents as given (empty if the source pools them) |
+| `solvents` | tuple[str, ...] | solvents as given (empty if the source does not separate them, e.g. USPTO) |
 | `products` | tuple[str, ...] | SMILES as given |
 | `mapped_rxn` | str \| None | atom-mapped reaction string, if any |
 | `temperature_c` | float \| None | |
-| `yield_pct` | float \| None | |
-| `year` | int \| None | |
+| `yield_pct` | float \| None | as given, may be above 100 |
+| `year` | int \| None | year of the record's date (for patents: grant year, not experiment year) |
 
 Rules: missing values are `None`, never `""`, `"empty"` or `"nan"`. The adapter does **no chemistry**:
 it only reads and reshapes. A row it cannot read becomes a rejected row with a reason.
+
+**ORDerly specifics** (decided 2026-10-01, from the 2,000-row sample):
+- `source_id` = the ORDerly row `index` as a string (unique in the sample; check on the full file).
+- `solvents` = `solvent_000/001`; `agents` = `agent_000`–`agent_002`. Roles are kept as given, even when
+  wrong (Et₃N listed as solvent, work-up NaHCO₃/EtOAc listed as agent/solvent). Fixing roles is
+  the job of annotate.
+- Salts arrive split into ions, each ion listed once (Na₂CO₃ → `O=C([O-])[O-]` + one `[Na+]`;
+  ammonium acetate → `[NH4+]` as reactant, acetate as agent). The adapter keeps the columns as they
+  are; the full stoichiometry is still in `mapped_rxn` (`rxn_str`). Rebuilding salts is a
+  standardise question (step 3).
+- `year` = `grant_date.year`. `date_of_experiment` is empty in all sample rows, and the month in
+  `grant_date` is garbled (stored in the minutes field), so only the year is used.
+- `yield_000` above 100 % (80 of 2,000 rows) is kept as given; a later stage filters it and reports
+  the reason.
 
 **One adapter per source** (`src/platepu/ingest/orderly.py`, …): a function that takes a file path
 and yields `ReactionRecord`s plus rejected rows.
