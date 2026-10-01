@@ -145,6 +145,7 @@ The prototype became unreadable through leftover files. These rules prevent it.
 
     src/platepu/      package, grows one stage at a time
     tests/            tests for every module
+    docs/design/      rebuild plan and stage designs
 
 **Provenance.** Split from a shared Glorius-group working tree; foundational commits by
 **Florian Boser** remain attributed in `git log`.

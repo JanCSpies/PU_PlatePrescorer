@@ -28,6 +28,7 @@ uv run pytest
 |---|---|
 | `src/platepu/` | the new package (grows one stage at a time) |
 | `tests/` | tests for every module |
+| `docs/design/` | rebuild plan and stage designs |
 
 Rows are added here as new folders appear.
 
