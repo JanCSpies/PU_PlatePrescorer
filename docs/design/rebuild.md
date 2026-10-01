@@ -35,6 +35,7 @@ Facts behind this order: `Reaction Corpus Atlas` (2,000-row samples, 2026-10-01)
 | `products` | tuple[str, ...] | SMILES as given |
 | `mapped_rxn` | str \| None | atom-mapped reaction string, if any |
 | `temperature_c` | float \| None | |
+| `reaction_time_h` | float \| None | reaction time in hours |
 | `yield_pct` | float \| None | as given, may be above 100 |
 | `year` | int \| None | year of the record's date (for patents: grant year, not experiment year) |
 
@@ -54,6 +55,9 @@ it only reads and reshapes. A row it cannot read becomes a rejected row with a r
   `grant_date` is garbled (stored in the minutes field), so only the year is used.
 - `yield_000` above 100 % (80 of 2,000 rows) is kept as given; a later stage filters it and reports
   the reason.
+- `reaction_time_h` = `rxn_time`, as given. ORDerly uses conventions here too ("room temperature" →
+  25 °C, "overnight" → 8 h, the most common time in the sample) and misses some times stated in the
+  procedure (row 167959: "for 3 hours", `rxn_time` empty). Atmosphere (N₂, Ar) is not captured.
 
 **One adapter per source** (`src/platepu/ingest/orderly.py`, …): a function that takes a file path
 and yields `ReactionRecord`s plus rejected rows.
