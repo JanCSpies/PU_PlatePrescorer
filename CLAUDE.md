@@ -148,6 +148,7 @@ The prototype became unreadable through leftover files. These rules prevent it.
     docs/design/      rebuild plan and stage designs
     configs/          chemistry and pipeline choices (YAML), e.g. the rxnutils pipeline
     scripts/          thin entry points and exploration scripts
+    LAB_JOURNAL.md    lab notebook (append-only)
 
 **Provenance.** Split from a shared Glorius-group working tree; foundational commits by
 **Florian Boser** remain attributed in `git log`.
