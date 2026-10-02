@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "pandas>=3.0.6",
     "pyarrow>=25.0.1",
+    "rdkit>=2026.3.6",
 ]
 
 [build-system]
@@ -30,3 +31,7 @@ extend-select = ["C90"]
 mccabe.max-complexity = 10
 # Sort `import platepu...` as our own code, even for modules that do not exist yet (tests first).
 isort.known-first-party = ["platepu"]
+
+[tool.pytest.ini_options]
+# Lets tests import exploration scripts in scripts/ (not a package) by module name.
+pythonpath = ["scripts"]
