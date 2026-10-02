@@ -69,6 +69,10 @@ and yields `ReactionRecord`s plus rejected rows.
 
 ## Stage 2 — standardise
 
+Built on rxnutils (ADR 001, `docs/decisions/001-rxnutils-standardisation.md`): every reaction first
+goes through `configs/rxnutils_std.yml` (sanitising, reagent roles from atom mapping, identity keys).
+`standardize()` adds only what rxnutils does not do:
+
 `standardize(smiles, role) -> str | None` plus a reason when it fails.
 
 - Covalent alkali salts become ionic (`O[Na]` → `[Na+].[OH-]`).
@@ -86,8 +90,8 @@ Pd(OAc)2, pyridone = hydroxypyridine, C–metal bonds kept) and a grid image of 
 | # | Commit topic (on `luka/rebuild-clean-slate`) | Work | Done when |
 |---|---|---|---|
 | 1 | `ingest-orderly` | `ReactionRecord` + ORDerly adapter + sample report; tests first | 5 hand-checked rows pass; report reviewed with Jan |
-| 2 | — (`scratch/`, not committed) | Try rxnutils and chython on adapter output from ORDerly **and** the Pistachio sample | numbers for what each changed or dropped; 20 drawn examples per tool |
-| 3 | `decision-standardise` | Decision record `docs/decisions/001-standardisation.md`, after Matt's and Almaz's replies | Jan and Luka agree |
+| 2 | — (`scratch/`, not committed) | ~~Try rxnutils and chython~~ Ran rxnutils on all of ORDerly; chython dropped | done 2026-10-02 (LAB_JOURNAL); Pistachio sample still to run |
+| 3 | `decision-standardise` | Decision record `docs/decisions/001-rxnutils-standardisation.md` | written 2026-10-02; Jan's review pending (PR #2) |
 | 4 | `standardise` | `standardize()` per the decision; hard-case tests first | all hard cases pass; RDKit round trip on all sample rows |
 | 5 | `ingest-uspto` | USPTO adapter (`a>b>c`, `\|f:\|` groups) | hand-checked rows pass; report reviewed |
 | 6 | `ingest-pistachio` | Pistachio adapter, output under `private/` | sample report; no Pistachio data committed |
@@ -98,7 +102,8 @@ That stage gets its own section here before it is built.
 ## Open questions
 
 - Which salts and organometallics keep their counter-ion as substrates? (list for config)
-- rxnutils pipeline on top, or only individual functions, or chython alone? (step 3)
+- ~~rxnutils pipeline on top, or only individual functions, or chython alone?~~ Answered by ADR 001:
+  the rxnutils pipeline on top, our own steps only for its gaps.
 - First plate class: amide/SNAr (open data suffices) or a cross-coupling (Pistachio needed early)?
   — Jan
 - Definition of a positive: reported at all, or yield above a cut-off? — later, before positives.
