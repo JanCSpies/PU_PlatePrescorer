@@ -91,7 +91,7 @@ Pd(OAc)2, pyridone = hydroxypyridine, C–metal bonds kept) and a grid image of 
 |---|---|---|---|
 | 1 | `ingest-orderly` | `ReactionRecord` + ORDerly adapter + sample report; tests first | 5 hand-checked rows pass; report reviewed with Jan |
 | 2 | — (`scratch/`, not committed) | ~~Try rxnutils and chython~~ Ran rxnutils on all of ORDerly; chython dropped | done 2026-10-02 (LAB_JOURNAL); Pistachio sample still to run |
-| 3 | `decision-standardise` | Decision record `docs/decisions/001-rxnutils-standardisation.md` | written 2026-10-02; Jan's review pending (PR #2) |
+| 3 | `decision-standardise` | Decision record `docs/decisions/001-rxnutils-standardisation.md` | written 2026-10-02; Jan's review pending (PR #1) |
 | 4 | `standardise` | `standardize()` per the decision; hard-case tests first | all hard cases pass; RDKit round trip on all sample rows |
 | 5 | `ingest-uspto` | USPTO adapter (`a>b>c`, `\|f:\|` groups) | hand-checked rows pass; report reviewed |
 | 6 | `ingest-pistachio` | Pistachio adapter, output under `private/` | sample report; no Pistachio data committed |

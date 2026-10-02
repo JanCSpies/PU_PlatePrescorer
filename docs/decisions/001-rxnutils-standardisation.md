@@ -1,6 +1,6 @@
 # 001 — rxnutils is the reaction-standardisation layer
 
-- **Status:** Accepted by Luka, 2026-10-02 · pending Jan's review (PR #2)
+- **Status:** Accepted by Luka, 2026-10-02 · pending Jan's review (PR #1; merged there from PR #2)
 - **Supersedes:** — · **Superseded by:** —
 
 ## Context
