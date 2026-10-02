@@ -31,6 +31,7 @@ uv run pytest
 | `docs/design/` | rebuild plan and stage designs |
 | `configs/` | chemistry and pipeline choices (YAML), e.g. the rxnutils pipeline |
 | `scripts/` | thin entry points and exploration scripts |
+| `LAB_JOURNAL.md` | append-only lab notebook |
 
 Rows are added here as new folders appear.
 
