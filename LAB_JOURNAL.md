@@ -5,6 +5,22 @@ interpretation → next. Every number can be regenerated with the commands in it
 
 ---
 
+## 2026-10-02 — Decision: rxnutils is the standardisation layer — Luka
+
+**Context.** The entry below left the standardisation tool open (rxnutils vs chython, planned as ADR 001).
+
+**Done.** Decided to use rxnutils as the main standardisation tool for every source, without the
+chython comparison; written up as `docs/decisions/001-rxnutils-standardisation.md`; work plan and open
+questions in `docs/design/rebuild.md` updated.
+
+**Result / interpretation.** Basis is the ORDerly run below: rxnutils left the condition-bin counts
+unchanged and gave usable duplicate keys. Our own `standardize()` (stage 2) only fills its gaps
+(covalent metal salts, substrate salt rules, tautomers).
+
+**Next.** Jan reviews ADR 001 in PR #2; run the Pistachio sample through the same pipeline.
+
+---
+
 ## 2026-10-02 — Amide-coupling condition bins in ORDerly, raw and after rxnutils — Luka
 
 **Context.** Before building reagent-role assignment we need one number: how many amide couplings

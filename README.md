@@ -29,6 +29,7 @@ uv run pytest
 | `src/platepu/` | the new package (grows one stage at a time) |
 | `tests/` | tests for every module |
 | `docs/design/` | rebuild plan and stage designs |
+| `docs/decisions/` | decision records (ADRs), one file per decision |
 | `configs/` | chemistry and pipeline choices (YAML), e.g. the rxnutils pipeline |
 | `scripts/` | thin entry points and exploration scripts |
 | `LAB_JOURNAL.md` | append-only lab notebook |
