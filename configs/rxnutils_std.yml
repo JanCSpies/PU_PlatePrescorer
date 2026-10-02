@@ -1,0 +1,50 @@
+# rxnutils standardisation pipeline: cleans each reaction and adds identity keys.
+# Copied unchanged from the rxnpipe prototype (~/University/Phd/Dataset/Datasets/rxnpipe/pipeline_std.yml,
+# 2026-09-29). Run with: python -m rxnutils.pipeline.runner --pipeline configs/rxnutils_std.yml ...
+# desalt_molecules / neutralize_molecules are deliberately NOT used: RDKit's SaltRemover drops
+# all-salt reagents (NaOH would disappear). reactants2reagents needs atom-mapped input.
+#
+# rxnutils pipeline: standardisation + identity keys. Same file for every source.
+# Keys are action names; a trailing digit disambiguates repeated actions.
+trim_rxn_smiles:            # strips junk (e.g. '|f:..|' leftovers, whitespace) from the reaction SMILES
+  in_column: rsmi
+  out_column: rsmi_trim
+remove_unsanitizable:       # molecules RDKit cannot sanitise are removed; names go to bad_column (kept for the reject report)
+  in_column: rsmi_trim
+  out_column: rsmi_san
+  bad_column: bad_molecules
+remove_unchanged_products:  # products that also appear unchanged among reactants/reagents
+  in_column: rsmi_san
+  out_column: rsmi_nochg
+reactants2reagents:         # anything on the reactant side with no mapped atom in the product -> reagent side (needs mapping)
+  in_column: rsmi_nochg
+  out_column: rsmi_roles
+remove_extra_atom_mapping:  # drop map numbers in reactants/reagents that do not occur in products
+  in_column: rsmi_roles
+  out_column: rsmi_map
+count_components:
+  in_column: rsmi_map
+  nreactants_column: n_reactants
+  nmapped_reactants_column: n_reactants_mapped
+  nreagents_column: n_reagents
+  nmapped_reagents_column: n_reagents_mapped
+  nproducts_column: n_products
+  nmapped_products_column: n_products_mapped
+product_atommapping_stats:  # unmapped product atoms + 'widow' atoms (mapped in product, absent in reactants)
+  in_column: rsmi_map
+  unmapped_column: n_unmapped_product_atoms
+  widow_column: n_widow_product_atoms
+has_stereo_info:
+  in_column: rsmi_map
+  out_column: has_stereo
+remove_atom_mapping:        # map-stripped canonical reaction, for the identity key
+  in_column: rsmi_map
+  out_column: rsmi_nomap
+pseudo_reaction_hash:       # core key: InChIKey-based hash of reactants+products, reagents ignored
+  in_column: rsmi_nomap
+  out_column: core_key
+  no_reagents: true
+pseudo_reaction_hash2:      # full key: same, but reagents included
+  in_column: rsmi_nomap
+  out_column: full_key
+  no_reagents: false
