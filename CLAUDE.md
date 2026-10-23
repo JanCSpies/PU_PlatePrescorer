@@ -1,6 +1,6 @@
 # CLAUDE.md — PU_PlatePrescorer
 
-> Loaded into every Claude Code session in this repo. Shared with Jan: project rules only.
+> Loaded into every Claude Code session in this repo. Project rules only.
 > Personal preferences go in `~/.claude/CLAUDE.md`. Keep this file short, true, under 200 lines.
 
 ## 1. Project
@@ -28,12 +28,12 @@ well is run.
   including the Chemlex 0.768 ROC-AUC, are **unverified targets** to reproduce or explain.
 - **Never copy code from `v0-prototype`.** Read it for ideas only:
   `git worktree add ../PU_v0 v0-prototype`.
-- `main` = archived prototype line. **`luka/rebuild-clean-slate` = rebuild base** (PR #1). Until
-  it is merged, work is committed directly on it in small, one-topic commits; never on `main`.
+- `main` = archived prototype line. **`luka/rebuild-clean-slate` = rebuild base** (PR #1). All
+  rebuild work stays on this branch, with no new branches, until it is merged; never on `main`.
+- **Commit only when Luka asks**, at the end of a piece of work, never automatically after each step.
+  Never push without asking.
 - Plan: `docs/design/rebuild.md`. **A stage is built only after that file describes it** (inputs,
-  outputs, tools, verification) and Jan and Luka agree.
-- Ownership: Luka — data side (ingest → standardise → annotate → catalogue → positives table).
-  Jan — models, evaluation, plate. The positives table is the hand-over.
+  outputs, tools, verification).
 
 ## 3. Commands
 
@@ -44,6 +44,8 @@ well is run.
 Dev data (open, 2,000-row samples): `~/University/Phd/Dataset/Datasets/samples_2k/`. The Pistachio
 sample is licensed and lives apart in `samples_2k/private/`. Full corpora: cluster,
 `/mnt/datasets/`. Paths come from config or arguments, never hard-coded.
+Raw held-out sets (read-only): `~/University/Phd/Dataset/Datasets/raw/` (e.g. `raw/Chemlex/`).
+Outputs of a step: `~/University/Phd/Dataset/Datasets/derived/<step-name>/`, outside the repo.
 
 ## 4. Keep the repository clean
 
@@ -64,14 +66,15 @@ The prototype became unreadable through leftover files. These rules prevent it.
   to this task. Unrelated changes (formatting sweeps, renames) get their own commit.
 - **Delete, don't keep:** no `_old`, `_v2`, `_final`, `backup`, `test2` files, no commented-out
   code. Git keeps the history.
-- **Small, focused commits** with prefixes: `feat`, `fix`, `test`, `docs`, `chore`, `refactor`.
-  One task per branch; PRs of about 100–300 changed lines.
+- **Focused commits** with prefixes: `feat`, `fix`, `test`, `docs`, `chore`, `refactor`; when
+  asked to commit, split the work into one-topic commits.
 
 ## 5. Keep the code simple (no spaghetti)
 
 - **Stages talk through tables, not through each other.** Each stage reads one table and writes
-  one table. Imports go one way only: ingest → standardise → annotate → catalogue. A module never
-  imports from a later stage; no circular imports.
+  one table. Imports go one way only: ingest → reactions → classify → standardise → positives /
+  benchmarks / library → features, with `io` below all. A module never imports from a later stage; no circular
+  imports.
 - **Separate I/O from chemistry.** Reading and writing files happens at the edges (adapters,
   scripts). Chemistry functions take values and return values; they never open files or read
   globals. That makes them testable.
@@ -91,7 +94,8 @@ The prototype became unreadable through leftover files. These rules prevent it.
   the row was rejected.
 - Full type hints; Google-style docstrings that say *why*. `logging` in `src/`, never `print`.
 - **Ask before adding a dependency.** Prefer RDKit, pandas, pyarrow and what `pyproject.toml`
-  already has; test a new library on our hard cases first.
+  already has; test a new library on our hard cases first. Agreed: rxnutils (ADR 001),
+  scikit-learn (ADR 006), openpyxl (the Chemlex workbook), pyyaml. Anything else is asked first.
 - Tables are pandas/pyarrow; data files Parquet, config YAML. No custom formats.
 
 ## 6. Cheminformatics workflow
@@ -106,7 +110,7 @@ The prototype became unreadable through leftover files. These rules prevent it.
 - **Every stage reports** rows in, rows out, rows rejected by reason, and saves the rejected rows.
 - **Look at the chemistry:** when a step changes molecules, save a grid image of about 20 changed
   examples (before → after) for a human to check. Numbers alone do not verify chemistry.
-- **Chemistry choices live in config** (`configs/*.yaml`): reaction classes, condition families,
+- **Chemistry choices live in config** (`configs/*.yml`): reaction classes, condition families,
   salt rules, the definition of a positive. Code reads them; it does not hard-code them.
 - **One standardisation for P, U and TEST;** every row carries `std_version`.
 - **No leakage:** evaluation sets never enter training; check overlap by InChIKey and report it.
@@ -123,8 +127,14 @@ The prototype became unreadable through leftover files. These rules prevent it.
 
 ## 8. Working agreement
 
-- Branch + pull request for every change; reviewed before merge.
-- `LAB_JOURNAL.md` is append-only: new dated, author-tagged entry at the top (context → done →
+- Changes reach `main` only through a reviewed pull request (now PR #1, see §2).
+- **Check the numbers before writing code.** Before code is written for a set of reactions, count
+  them in the real data (rows, cases, edge cases) and agree on the rule from those counts. The code
+  then implements the agreed rule and nothing more.
+- **As little code as possible, as robust as possible.** Prefer the simplest version that handles
+  the cases actually present in the data; fail loudly (a clear error) on input outside them instead
+  of guessing. No option, branch or helper for a case the data does not have.
+- `LAB_JOURNAL.md` is append-only: new dated entry at the top, written in the first person (context → done →
   result → interpretation → next). Never rewrite an old entry.
 - Decisions: `docs/decisions/NNN-title.md`; accepted ones are superseded, never rewritten.
 - Literature notes: one file per paper in `docs/literature/notes/`.
@@ -137,19 +147,57 @@ The prototype became unreadable through leftover files. These rules prevent it.
 
 - Raw HTE sets (Chemlex, HiTEA) and literature corpora are **never committed**; read in place.
 - Open: ORD, ORDerly, USPTO, CHORISO, CJHIF, NiCOlit (MIT).
-- **Licensed: Pistachio and everything derived from it** — only under a `private/` folder
-  (git-ignored at any depth), never in tests, never published.
-- Everything the paper ships must be reproducible from open sources alone.
+- **Chemlex is CC BY-NC-ND 4.0:** no row of it or table derived from it is shared or committed,
+  test fixtures included; we publish only the code that rebuilds them from the original file.
+- **Not open, only under `private/`** (git-ignored at any depth), never in tests, never published:
+  Pistachio (`licensed`), the inventory (`internal`, ADR 004), Chemlex (`noncommercial`, ADR 009,
+  labels and validation/test too), and all derived from each. `io.write_table` enforces it as an
+  allow-list — outside `private/` a licence column may hold only `open` — and `io.strictest_licence`
+  is the one place the merge rule lives. Details and the one known gap: ADR 009.
+- Everything the paper ships must be reproducible from open sources alone; it is published from a
+  fresh repository without the prototype history (ADR 005).
 
 ## 10. Layout (only what exists — update in the same commit when it changes)
 
-    src/platepu/      package, grows one stage at a time
+    src/platepu/      package, one subpackage per stage: ingest/, reactions/ (smiles, mapping, clean),
+                      classify/, standardise/, positives/, benchmarks/, library/, features/, score/; io.py writes outputs
     tests/            tests for every module
-    docs/design/      rebuild plan and stage designs
+    docs/design/      rebuild plan and stage designs; rebuild.md holds the target layout
     docs/decisions/   decision records (ADRs), NNN-title.md
+    docs/literature/notes/  one note per paper (agent summaries say so in their header)
     configs/          chemistry and pipeline choices (YAML), e.g. the rxnutils pipeline
-    scripts/          thin entry points and exploration scripts
+    scripts/          thin entry points per stage, and exploration scripts until replaced;
+                      counts/ holds the count scripts publication depends on (ADR 011)
     LAB_JOURNAL.md    lab notebook (append-only)
+    .claude/agents/   subagent definitions (§11); .claude/settings.json holds the permission rules
+
+**Pipeline** (ADR 002, `docs/design/rebuild.md`): ingest → reaction SMILES → RXNMapper → rxnutils
+clean → classify → standardise → positives / benchmark labels. Only the adapter depends on the
+source; a reaction class is a YAML file in `configs/classes/`. Stage tables live outside the repo in
+`Datasets/derived/<source>/`.
+
+## 11. Agents (`.claude/agents/`)
+
+The main session plans, writes code in `src/` and `scripts/`, and talks to Luka. Ten subagents do the
+rest; each may write only where its row says. **No agent pushes, installs, or writes to GitHub.**
+
+| agent | when | may write |
+|---|---|---|
+| `repo-scout` | a change touches >1 module; "where / how does X" | nothing |
+| `stage-architect` | a stage, adapter, class, model step or dependency `docs/design/*.md` lacks | nothing |
+| `data-counter` | before coding any rule, filter, SMARTS, family or threshold | `scratch/` |
+| `chem-verifier` | before code: failing tests; after code: the four gates + grid image | `tests/` |
+| `pr-reviewer` | after GREEN, before guardian; or "review PR N" | nothing |
+| `architecture-reviewer` | before a stage PR is ready; new subpackage; module near 300 lines | nothing |
+| `data-guardian` | before every commit; any change to `io.py`, `.gitignore`, paths, adapters, splits | nothing (PASS/BLOCK) |
+| `journal-scribe` | end of a piece of work; decision; paper read; file or folder added | `LAB_JOURNAL.md` (prepend), `docs/`, §10 |
+| `git-curator` | only when Luka says "commit" or asks for a PR body | `git add <path>`, `git commit`, `scratch/pr_body.md` |
+| `repo-steward` | before a PR is marked ready; "audit the repo" | `scratch/github/` |
+
+**Order for a piece of work:** scout → counter → architect (if the design is missing) → Luka agrees
+the rule → verifier writes tests → main session writes code → verifier runs the gates → pr-reviewer →
+guardian → scribe → git-curator (on Luka's word) → repo-steward before "ready". A guardian BLOCK or a
+reviewer BLOCKER stops the commit. Agents never read the Chemlex test side or HiTEA.
 
 **Provenance.** Split from a shared Glorius-group working tree; foundational commits by
 **Florian Boser** remain attributed in `git log`.

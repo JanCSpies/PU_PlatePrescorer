@@ -27,12 +27,15 @@ private/
 *.ipynb
 scratch/
 # The one exception: small, hand-checked open fixtures for tests.
-!tests/data/**
+# Only parquet fixtures are un-ignored: a csv or an image dropped here stays ignored.
+!tests/data/*.parquet
 # The last matching rule wins, so private/ is repeated here: licensed data is never a fixture.
 private/
 
 # --- Literature PDFs: copyrighted, do not redistribute (notes in docs/ are ours) ---
-literature/**/*.pdf
+# Anchored at any depth: the old `literature/**/*.pdf` was root-anchored and missed docs/literature/.
+# Nothing this project tracks is a PDF (CLAUDE.md §4), so the rule is simply every PDF.
+*.pdf
 
 # --- Trained-model blobs: large, regenerable, never tracked ---
 *.cbm
@@ -40,6 +43,9 @@ literature/**/*.pdf
 *.pt
 *.pkl
 mlruns/
+
+# --- Generated knowledge graph (graphify): regenerable, local only ---
+graphify-out/
 
 # --- OS ---
 .DS_Store

@@ -8,10 +8,13 @@ authors = [
 ]
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "openpyxl>=3.1.5",
     "pandas>=2.3,<3",
     "pyarrow>=25.0.1",
+    "pyyaml>=6.0.3",
     "rdkit>=2026.3.6",
     "reaction-utils>=1.9.4",
+    "scikit-learn>=1.9.1",
     "setuptools<81",
 ]
 
@@ -25,6 +28,7 @@ dev = [
     "pandas-stubs<3",
     "pytest>=9.1.1",
     "ruff>=0.16.9",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [tool.ruff.lint]
@@ -37,3 +41,9 @@ isort.known-first-party = ["platepu"]
 [tool.pytest.ini_options]
 # Lets tests import exploration scripts in scripts/ (not a package) by module name.
 pythonpath = ["scripts"]
+
+[[tool.mypy.overrides]]
+# pyarrow, rxnutils and scikit-learn ship no type information; their calls are covered by tests, or
+# (for sklearn, used only by the adversarial-validation count) by the numbers the script prints.
+module = ["pyarrow", "pyarrow.*", "rxnutils.*", "sklearn.*"]
+ignore_missing_imports = true
