@@ -1,7 +1,7 @@
 # 001 — rxnutils is the reaction-standardisation layer
 
 - **Status:** Accepted by Luka, 2026-10-02 · pending Jan's review (PR #1; merged there from PR #2)
-- **Supersedes:** — · **Superseded by:** —
+- **Supersedes:** — · **Superseded by:** 002 in part (roles, agents and solvents from the mapping; RXNMapper for every source)
 
 ## Context
 
