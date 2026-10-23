@@ -1,0 +1,4 @@
+# Paths on Luka's Mac (sample runs). The cluster gets its own file, configs/paths/cluster.yml.
+root: ~/University/Phd/Dataset/Datasets/derived_samples   # output root for stage tables and caches
+rxnmapper_python: ~/University/Phd/envs/rxnmapper/bin/python   # Python 3.12 env with rxnmapper 0.4.3
+mapper_batch_size: 16   # reactions per RXNMapper call; raise on a GPU
