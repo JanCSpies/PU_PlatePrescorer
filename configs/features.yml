@@ -1,0 +1,36 @@
+# Substrate features (docs/design/modeling.md, Stage F; ADR 006, item 2).
+# Morgan counts per substrate, as PAYN (r = 2, 2,048 bits). No chirality: enantiomers get one row of
+# features under two keys; stereo stays in key_stereo for identity, not in the model.
+morgan:
+  radius: 2
+  n_bits: 2048
+
+# The same fingerprint computed from the reacting atom alone (RDKit's `fromAtoms`), so it carries
+# only the environments centred on it: at most radius + 1 bits. It is NOT a subset of the
+# whole-molecule fingerprint. The generator drops an environment whose bond set is contained in
+# another it has already recorded, and the sphere around a terminal atom is contained in the sphere
+# around its neighbour; an amine N is terminal, so its radius-2 environment is dropped from the full
+# fingerprint and appears only here (checked on aniline, 2026-10-22).
+# Measured 2026-10-22: 459 distinct rooted environments over 10,204 amines, and every one of them
+# falls inside a single hand-written amine subclass. It is therefore a generic, finer replacement
+# for a taxonomy, and it needs no per-class chemistry: only the `:1` mark the role SMARTS already has.
+morgan_centre:
+  radius: 2
+  n_bits: 2048
+
+# Substituents counted on the aromatic ring system of the reacting atom (`n_ewg_on_ring`). They
+# lower the nucleophilicity of an aniline: Hammett rho is -2.1 in water and -2.5 in MeCN against
+# benzhydrylium ions (Brotzel, Chu & Mayr, J. Org. Chem. 2007, 72, 3679). Which groups withdraw
+# electrons does not depend on the reaction class, so the list is here, not in the class YAML.
+# A substituent is counted once, by the atom that attaches it to the ring, and that attachment atom
+# must be the FIRST atom of the SMARTS: write the group's own atom first, never `O=[CX3]...`.
+# A fused cyclic imide therefore counts 2, once per carbonyl. Not counted, by design: a ring halogen,
+# OCF3, an N-aryl sulfonamide, and a carbonyl that is itself inside the aromatic ring system.
+electron_withdrawing:
+  - {name: nitro, smarts: "[$([NX3+](=O)[O-]),$([NX3](=O)=O)]"}
+  - {name: nitrile, smarts: "[CX2]#N"}
+  - {name: trihalomethyl, smarts: "[CX4]([F,Cl,Br])([F,Cl,Br])[F,Cl,Br]"}
+  - {name: sulfonyl, smarts: "[SX4](=O)=O"}
+  # Any carbonyl on the ring: amide, ketone, ester or aryl aldehyde (the ring carbon itself is the
+  # [#6] of the pattern). This is the only one of the five that the validation anilines carry.
+  - {name: carbonyl, smarts: "[CX3](=O)[#6,#7,#8]"}
