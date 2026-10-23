@@ -1,0 +1,16 @@
+# Molecule standardisation choices (docs/design/rebuild.md, Stage 6). Entries are SMILES as a chemist
+# writes them; they are canonicalised when loaded. Change std_version whenever anything here changes.
+std_version: "2"   # 2 (2026-10-09): substrates reduced to their largest fragment
+
+# Agent and solvent SMILES -> the SMILES used instead.
+synonyms:
+  # HATU: the O-form (uronium) is the historical drawing; the guanidinium N-oxide is its real
+  # structure (Valeur & Bradley, Chem. Soc. Rev. 2009). ORDerly only uses the O-form; Chemlex both.
+  "CN(C)C(On1nnc2cccnc21)=[N+](C)C": "CN(C)C(n1n[n+]([O-])c2ncccc21)=[N+](C)C"
+
+# Counter-ions dropped from condition keys: they never decide the reaction. Decided 2026-10-02.
+counter_ions:
+  - "Cl"                   # HCl of EDC·HCl or of an amine hydrochloride (ORDerly splits salts)
+  - "[Cl-]"
+  - "F[P-](F)(F)(F)(F)F"   # PF6- of HATU, HBTU, PyBOP
+  - "F[B-](F)(F)F"         # BF4- of TBTU, so HBTU and TBTU give one key

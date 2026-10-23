@@ -1,0 +1,41 @@
+# Amide coupling: carboxylic acid + amine -> amide (docs/design/rebuild.md, Stage 5; ADR 002).
+# Each role is a SMARTS with the reacting atom marked :1. Both are charge-tolerant because classify
+# runs before standardisation (carboxylates and ammonium salts occur in ORDerly).
+name: amide_coupling
+roles:
+  acid:
+    # No subclasses. They were added on 2026-10-21 and removed on 2026-10-22: no baseline used them,
+    # and a Morgan fingerprint rooted at the reacting atom recovers the same families generically,
+    # with 99.9 % purity over 11,787 acids and no SMARTS to write (ADR 008). The nine definitions and
+    # what they showed (alpha_quaternary 0.136 success against heteroaryl_pi_donor 0.470) stay
+    # reproducible in `scratch/count_subclass_evidence.py`.
+    smarts: "[CX3:1](=O)[OX2H1,OX1-]"   # carboxyl C of an acid or carboxylate
+  amine:
+    # N-H that is not on C=O, C=S, C=N (amides, thioamides, amidines, guanidines), SO2, C#N, N or O.
+    # Decided 2026-10-09: only true amines. Not this class (counted, not assigned elsewhere yet):
+    # sulfonamides, amidines/guanidines, thioamides (Chemlex 1,697 rows) and hydrazines /
+    # hydroxylamines, i.e. hydrazides and hydroxamates incl. Weinreb amides (Chemlex 589 rows).
+    # Enaminones / vinylogous amides (N-C=C-C=O, e.g. 1,4-dihydropyridine N-H) stay amines (decided
+    # 2026-10-09): Chemlex has 502 such rows, 3 % >= 20 %, kept as hard, mostly negative amines.
+    smarts: "[N;!a;!H0;!$(N-C=[O,S,N]);!$(N-S(=O)=O);!$(N-C#N);!$(N-[N,O]);!$(N=*):1]"
+    # Subclasses of the amine only, and only because baseline B4 and the within-class evaluation of
+    # ADR 007 need them: hand-written chemistry belongs in the opponent and in the reporting, never
+    # in the model's features (ADR 008). First match wins; a subclass counts only when its :1 atom is
+    # the reacting N. Anchoring at it changes the class of 821 of 9,973 positive amines.
+    subclasses:
+      - {name: heteroaryl_amine, smarts: "[NX3;!H0:1]-[c,n;r5,r6]@[n,o,s]"}   # 2-aminopyridine
+      - {name: aniline, smarts: "[NX3;!H0:1]-c"}
+      - {name: aliphatic_secondary, smarts: "[NX3;H1;!$(N-a):1]([#6])[#6]"}
+      - {name: aliphatic_primary, smarts: "[NX3;H2;!$(N-a):1][#6]"}
+formed_bond: [acid, amine]   # the bond formed between the two reacting atoms
+allowed_dynamic_bonds: [2]   # positives only: C-O broken, C-N formed (Chemlex 11,642/11,662)
+
+# Condition families for positives (stage 7a). A reaction is in a family when its condition key
+# contains every listed reagent; extra reagents are allowed (decided 2026-10-09) and the full key is
+# kept, so extras can be looked at later. SMILES are standardised when loaded (HATU -> N-oxide).
+condition_families:
+  HATU_DIPEA_DMF: ["CN(C)C(On1nnc2cccnc21)=[N+](C)C", "CCN(C(C)C)C(C)C", "CN(C)C=O"]
+
+positives:
+  min_yield_pct: null   # none for now; P sizes at 0, 10 and 20 % are reported before choosing
+  single_reactive_group: true   # each substrate has one group of its role and none of the other
