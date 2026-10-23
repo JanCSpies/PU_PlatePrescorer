@@ -66,6 +66,7 @@ def record_from_row(row: Mapping[str, object]) -> ReactionRecord | RejectedRow:
         return RejectedRow(source=SOURCE, source_id=source_id, reason="no reactants")
     if not products:
         return RejectedRow(source=SOURCE, source_id=source_id, reason="no products")
+    yield_pct = _number(row.get("yield_000"))
     return ReactionRecord(
         source=SOURCE,
         source_id=source_id,
@@ -74,11 +75,13 @@ def record_from_row(row: Mapping[str, object]) -> ReactionRecord | RejectedRow:
         agents=_smiles_columns(row, "agent_"),
         solvents=_smiles_columns(row, "solvent_"),
         products=products,
-        mapped_rxn=_text(row.get("rxn_str")),
+        source_rxn=_text(row.get("rxn_str")),
         temperature_c=_number(row.get("temperature")),
         reaction_time_h=_number(row.get("rxn_time")),
-        yield_pct=_number(row.get("yield_000")),
+        yield_pct=yield_pct,
+        yield_kind="isolated" if yield_pct is not None else None,
         year=_year(row.get("grant_date")),
+        source_document=_text(row.get("extracted_from_file")),
     )
 
 

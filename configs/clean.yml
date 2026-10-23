@@ -1,0 +1,28 @@
+# Stage 4, clean: rxnutils actions run in order on the RXNMapper output (ADR 001, ADR 002).
+# Counted 2026-10-09 on ORDerly samples_2k + Chemlex: remove_unsanitizable changed nothing (stage 2
+# already rejects unreadable molecules), so it is left out. Desalting/neutralising stay off.
+# The code reads clean_rsmi, n_reactants, n_products and n_dynamic_bonds; keep these names.
+remove_unchanged_products:  # a "product" that is also a reactant, unchanged, is not a product
+  in_column: mapped_rsmi
+  out_column: rsmi_products
+reactants2reagents:         # every molecule that gives no atom to the product becomes a reagent
+  in_column: rsmi_products
+  out_column: rsmi_roles
+remove_extra_atom_mapping:  # map numbers on reagents and on atoms that never reach the product
+  in_column: rsmi_roles
+  out_column: clean_rsmi
+count_components:
+  in_column: clean_rsmi
+  nreactants_column: n_reactants
+  nmapped_reactants_column: n_reactants_mapped
+  nreagents_column: n_reagents
+  nmapped_reagents_column: n_reagents_mapped
+  nproducts_column: n_products
+  nmapped_products_column: n_products_mapped
+product_atommapping_stats:  # product atoms without a map / mapped atoms with no reactant partner
+  in_column: clean_rsmi
+  unmapped_column: n_unmapped_product_atoms
+  widow_column: n_widow_product_atoms
+cgr_dynamic_bonds:          # bonds formed + broken in the CGR (CGRtools); None if no CGR can be built
+  in_column: clean_rsmi
+  out_column: n_dynamic_bonds
