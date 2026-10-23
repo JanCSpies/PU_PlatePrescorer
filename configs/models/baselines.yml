@@ -1,0 +1,17 @@
+# Stage S1: the baselines B0 to B7 (docs/design/modeling.md, "Stage S — scores"; ADR 006 item 5 and
+# ADR 007 item 5). None of them fits a parameter, so the only settings are the seed and the scores of
+# B4. Change the seed and B0 changes; change nothing else and a run repeats exactly.
+model: baselines
+seed: 20261021
+
+# B4, the chemist's rule of ADR 006 item 3: aliphatic primary > secondary > aniline > heteroaryl.
+# "other" is listed explicitly and is never defaulted; it sits with aniline because we do not know
+# what those amines are (counted 2026-10-21: N on P, Si or N+, 5 of 53 validation amines).
+# The order is a convention for the baseline, not a fact: Mayr's nucleophilicities put cyclic
+# secondary amines highest. It is not changed to match validation.
+amine_subclass_scores:
+  heteroaryl_amine: 0
+  aniline: 1
+  other: 1
+  aliphatic_secondary: 2
+  aliphatic_primary: 3
