@@ -1,0 +1,19 @@
+# Chemlex benchmark (Zhong et al., Nat. Commun. 2025). docs/design/rebuild.md, Stage 7b.
+# Roles come from Chemlex's own columns, never from the mapping (decided 2026-10-09).
+name: chemlex
+# CC BY-NC-ND 4.0 (Zhong et al.). Stamped on the labels and carried to validation and test, so the
+# licence guard refuses them outside private/ on content and not on the path (ADR 009).
+licence: noncommercial
+class: amide_coupling   # configs/classes/amide_coupling.yml; rows whose molecules do not fit are counted
+roles: [acid, amine]    # reactants[0] plays the class's first role, reactants[1] the second
+
+# Labels from LC-MS conversions (never isolated yields). Decided 2026-10-09 from the replicate counts:
+# replicates are kept only when all are 0 % or all are >= replicate_min_pct; a kept reaction is
+# positive when its mean conversion is >= positive_min_pct (the paper's cut-off).
+label_rule:
+  positive_min_pct: 20
+  replicate_min_pct: 10
+
+# Splits kept per reaction: these must be the same for every measurement of one reaction (checked
+# 2026-10-09). The random split is not: it puts replicates on both sides in 221 HATU reactions.
+reaction_splits: [one_unseen, both_unseen]
