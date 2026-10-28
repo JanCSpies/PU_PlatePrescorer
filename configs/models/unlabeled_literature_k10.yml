@@ -1,0 +1,27 @@
+# Stage U, the literature-built unlabeled space (docs/design/modeling.md, ADR 013 and ADR 015).
+# k is the P:U ratio: the marginals are matched, so there is no second knob.
+k: 10
+seed: 20261028
+# Quantile bins of n_heavy_atoms over the distinct P substrates of each role. A replacement comes
+# from the bin of the substrate it replaces, which keeps the literature's size anti-correlation
+# (-0.388); drawing both sides freely gives +0.003 and opens a 0.640 shortcut on two numbers.
+size_bins: 10
+p_width: all
+# Flat keys: the fingerprints are chirality-blind and isotope-blind, so two stereo variants are one
+# input to the model and a drawn pair that is a positive under another drawing is a positive.
+subtract_p_on: key_flat
+match: size_stratified_one_side
+
+# The gate (ADR 017). Frequency matching promises that each substrate sits in U about k times as
+# often as in P, and the stage raises past these rather than reporting and carrying on.
+#
+# The marginal tolerance is a MULTIPLE of a simulated null, not an absolute number. A perfect
+# sampler still shows some total-variation distance from sampling noise alone, and that floor grows
+# as P shrinks: on a 40-pair fixture a correct sampler reads 0.105, where the real 28,158-pair draw
+# reads 0.053. An absolute threshold would therefore false-alarm on a small class and go slack on a
+# big one. The floor is drawn here -- gate_null_draws multinomials of U's size from P's own
+# frequencies, 99th percentile -- and the gate is that floor times the multiple. The multiple is the
+# number chosen in advance; the threshold follows from the data.
+gate_rank_auc_tolerance: 0.02
+gate_marginal_tv_multiple: 2.0
+gate_null_draws: 200
