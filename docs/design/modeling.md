@@ -29,6 +29,9 @@ are. Each writes a table, a report and, where rows can be dropped, a rejected ta
 |---|---|---|---|---|
 | lab library | `library/inventory.py`, `scripts/library.py` | the inventory export (xlsx, header on row 3; internal) and the class YAML | `private/library/<class>.parquet`: one row per compound (by `key_stereo`) with its role, containers, name, CAS; `.rejected.parquet` per container: `no_smiles`, `unparsable`, `neutralise_failed`, `no_inchikey`, `no_role`, `both_roles`, `multiple_groups` | `tests/test_library.py`; full export 10,212 containers → 529 acids, 538 amines |
 | unlabeled U | `library/unlabeled.py`, `scripts/unlabeled.py` | the library, the positives, the benchmark validation set | `private/unlabeled/<class>/<family>.parquet`: every role-A × role-B library pair not in P of the family (by stereo keys); report: overlap of lab and validation substrates with P (flat keys) | `tests/test_unlabeled.py`; 284,595 pairs, 7 lab pairs in P |
+| U literature | `positives/unlabeled.py`, `scripts/unlabeled_literature.py` | the positives at `family = "all"`, the U config | `unlabeled/<class>/<config>.parquet`: one row per drawn counter-pair, one side replaced from the same heavy-atom decile, P subtracted on flat pair keys | `tests/test_unlabeled_literature.py`; the joint size probe at ~0.5 against a uniform-U control |
+| S2a reliable negatives | `score/pu.py`, `scripts/score_pu.py` | features, positives, U, the S2 config | `pu/<class>/<config>.negatives.parquet`: one row per U pair and per spy, with its spy score and whether it is a reliable negative | `tests/test_score_pu.py`; realised spy recall equals the configured 0.95 |
+| S2b PU scores | `score/pu.py`, `scripts/score_pu.py` | features, positives, the S2a negatives, the validation pairs, the inventory grid | the stage S score layout, one row per (model, feature block, scored pair) | two runs identical; B2 and B8 reproduce from the shared pair assembly |
 | validation / test | `benchmarks/split.py`, `scripts/benchmark_split.py` | `private/benchmarks/<name>/labels.parquet`, the family from the class YAML | `private/benchmarks/<name>/<family>/validation.parquet` and `test.parquet` (split `test`); labelled reactions in the family only (`in_family`); the report records `shared_acids` and `shared_amines` | `tests/test_benchmark_split.py`; Chemlex HATU_DIPEA_DMF 2,615 / 1,313, 0 shared acids, 0 shared amines (flat keys) |
 
 ### Validation set (redefined 2026-10-22)
@@ -341,7 +344,10 @@ keeping the 37.6 % of pairs that report no yield at all, and it changes P by 6.6
 because the inventory pairs are internal (ADR 004); every row carries `licence`, so `write_table`
 enforces the path from the column. One row per scored pair: `score_set` (`validation` or
 `inventory`), `key_a_stereo`, `key_b_stereo`, `score` (float32, higher is better, comparable only
-inside one `score_set`), `model`, `p_width`, `seed`, `config_sha256`, `std_version`, `licence`.
+inside one `score_set`), `model`, `feature_block`, `p_width`, `seed`, `config_sha256`,
+`std_version`, `licence`. `feature_block` is `morgan` for B2 and B3, `morgan_centre` for B8, `none`
+for B0, B1 and B4 to B7, and the configured block for a stage S2 model, so one row is one
+(model, feature block, scored pair) and stage E needs no lookup of which model used what.
 There is **no rank column** (Luka, 2026-10-21). A rank is derived, it is not comparable between
 models, and its meaning depends on a tie convention; stage E and the plate step each compute the
 ranking they need. The report records the tie structure instead, because the coarse baselines are
@@ -402,6 +408,12 @@ see `docs/decisions/008-hand-written-chemistry-belongs-in-the-opponent.md`), so 
   scores agreed at Spearman 0.982 on the old set but not exactly. The one-descriptor form is what is implemented,
   because it is simpler and scores higher, so it raises the bar rather than lowering it. ADR 007 is
   accepted and not rewritten; the correction is recorded here, in the journal, and in ADR 008.
+- **B8 nearest positive pair on `morgan_centre`** (declared 2026-10-23, **before** stage S2 ran).
+  B2's definition on the rooted fingerprint. Measured **0.7115** on validation against B2's 0.6317,
+  from the same production code path. It sits below B4 (0.743), so it is not the binding bar; it
+  exists to isolate what *fitting* adds over the same fingerprint with none. It is a **new** baseline
+  and not a redefinition of B2, which ADR 012 item 4 forbids because B2 is named in a
+  pre-registration.
 - **B7 size only (added 2026-10-21):** `-(a_n_heavy_atoms + b_n_heavy_atoms)`. This is a control, not
   a chemistry baseline: it shows how much of a model's validation score is explained by size alone.
   Its sign comes from the prior that a less hindered pair reacts faster, not from validation, where
@@ -416,8 +428,10 @@ the baseline settings; `write_report` records the hash of it, of the class YAML 
 `configs/features.yml`, plus the git commit and package versions. Before the test side is read, the
 model YAML and the validation report are committed.
 
-**Stage S must not** compute a metric, read a label or any `test.parquet`, choose between
-configurations, or search hyperparameters.
+**Stage S must not** compute a metric **against a benchmark label**, read a label or any
+`test.parquet`, choose between configurations, or search hyperparameters. The adversarial AUC that
+ADR 008 item 7 requires beside every model is computed from stage F's `in_positives` and
+`in_library` columns and touches no label, so it belongs in the stage's own report.
 
 **Verification.** Tests first in `tests/test_score_pairs.py`, `tests/test_score_baselines.py` and
 `tests/test_score_script.py`, on open hand-written rows. A full run (seed 20261021, `std_version` 2)
@@ -475,6 +489,182 @@ whole acids and whole amines by flat key (`uv run python scripts/counts/count_b2
   show over a pre-registered baseline before I call it real.
 - The amines carry most of the uncertainty. Resampling amines alone gives a half-width of 0.083 for
   B6 minus B2; resampling acids alone gives 0.029.
+
+### Stage U — the literature-built unlabeled space (agreed 2026-10-23)
+
+Carries out ADR 008 item 4: U comes from the substrates that appear in the literature positives, never
+from the inventory. The inventory enters only at scoring time, with the adversarial AUC beside the
+score. `library/unlabeled.py` keeps building the inventory grid; since ADR 008 item 4 that grid is a
+**scoring set**, not training data, and the two must not be confused in a table or a report.
+
+**Why the stage is a sampler.** The class-wide cross-product is 11,543 acids × 9,959 amines =
+**114,956,737** pairs against 28,158 positives (`scratch/count_u_space.py`), so enumeration is not an
+option and *how* it is sampled is the whole design. Two shortcuts had to be closed, and both were
+measured before anything was written.
+
+**First, popularity.** 67.4 % of acids and 67.3 % of amines appear in exactly **one** reported pair.
+Draw U uniformly and a substrate reported 321 times is in P 321 times and in U about as often as one
+reported once, so a classifier separates P from U by how often a molecule gets reported rather than
+by whether the pair fits. Matching U's per-role marginals to P's removes it: a probe that sees
+nothing but each side's literature frequency scores **0.511** against a matched U and **0.892**
+against a uniform one of the same size.
+
+**Second, the pair structure.** The literature is strongly disassortative in size —
+`corr(size_acid, size_amine) = −0.388` — because a complex fragment is coupled to a simple building
+block. Drawing both sides independently destroys that (U comes out at +0.003), and a classifier given
+**two numbers**, the heavy-atom count of each side, then separates P from U at **0.640**: above B2
+(0.632) and B7 (0.598), reached with no chemistry at all. So each counter-pair replaces **one side**,
+drawn from the **same heavy-atom decile** as the substrate it replaces, weighted by P frequency; half
+the draws perturb the acid and half the amine. Measured: the joint probe falls to **0.510** and U's
+correlation to **−0.390** (ADR 015 item 1).
+
+This does not make U bias-free and nothing can — P's joint structure is shaped throughout by what
+people chose to publish. It removes the shortcuts that could be **named and measured**; the rest are
+reported.
+
+**Code.** `src/platepu/positives/unlabeled.py`, `scripts/unlabeled_literature.py`. It sits in
+`positives/` because its only input is the positives table and its output is a counterfactual of that
+table built from its own marginals. It imports nothing from `platepu` but `io`, so the one-way rule
+holds.
+
+**Config,** one YAML per configuration in `configs/models/`: `p_width: all`, `k: 10`, `seed`,
+`subtract_p_on: key_flat`, `match: size_stratified_one_side`, `size_bins: 10`. The k = 5 and k = 20
+sensitivity runs are two more files and the same code; the config hash distinguishes them.
+
+**Identity.** Draws are on **stereo** keys, because every pair table in this project joins on them.
+**P is subtracted on the flat pair key** (ADR 013 item 2): the fingerprints are chirality-blind and
+isotope-blind, so two stereo variants are one input to the model, and the error is asymmetric —
+removing one pair too many costs one candidate, leaving a known positive in U teaches the model that
+a published reaction is unknown. **U is not deduplicated against itself** (ADR 015 item 2): about
+19 % of draws repeat a pair at k = 10 and repeats concentrate on popular substrates, so deduplicating
+would pull exactly those below their P frequency and reopen the first shortcut in reverse. A repeat
+is legitimate weight and is carried in `n_draws`.
+
+**No top-up loop.** k × |P| draws are made once and rejects are not replaced: a drawn pair is already
+a known positive **1.11 %** of the time, so the loop would be a branch for a case the data does not
+have (CLAUDE.md §8). The report carries the realised deficit.
+
+**Output.** `<root>/unlabeled/<class>/<config-stem>.parquet`, `.rejected.parquet`, `.report.json`,
+**outside `private/`**: every substrate comes from the open positives, so the whole training side of
+the model is publishable and only the scoring side is internal. Columns: `key_a_stereo`,
+`key_b_stereo`, `key_a_flat`, `key_b_flat`, `substrate_a`, `substrate_b`, `n_draws` (int16),
+`licence`, `std_version`. Rejected reasons: `pair_in_p_flat`, and nothing else — a key is never under
+both roles, so an acid cannot be drawn as its own amine.
+
+**Report.** The P side (pairs, acids, amines, cross-product, the single-partner share this stage
+exists to neutralise); the draws (k, seed, requested, rejected by reason, out, realised P:U); marginal
+fidelity per role at both key levels (total-variation distance, the largest per-substrate deviation
+and which substrate, Spearman between P and U counts); the single-partner share recomputed on U, which
+must land on P's; U pairs also in P on stereo and on flat keys, both of which must be 0.
+
+**Verification,** tests first on a hand-written open P with a deliberately lopsided popularity:
+
+1. **The gate: the marginal.** The **rank**-AUC of one side's raw literature frequency must be
+   about 0.5 (measured **0.5036** on the real draw), and each substrate's U count must match k times
+   its P count within a tolerance fixed before the run. This is what frequency matching promises.
+
+   The measure is the rank-AUC of the feature itself, **not** a classifier fitted on it. On a single
+   monotone feature with classes at 1:9.7 and near-identical distributions there is nothing to fit,
+   so a gradient booster fits fold noise: on this same draw it returned **0.377**, an AUC below 0.5
+   on a feature whose own rank-AUC is 0.504. That is a property of the instrument, not of U. A model
+   is needed only where the probe has more than one feature and cannot be ranked directly.
+2. **Diagnostics, reported and never pass/fail** (ADR 017). The **joint** popularity probe — both
+   sides' frequencies — reads **0.597**; the **joint** size probe, the two sides' heavy-atom counts
+   and **not their sum**, reads **0.536**. The sum is blind to this and reads 0.498 even on an
+   independently drawn U, because anti-correlated sizes sum to about the same as uncorrelated ones.
+   Both are classifier-based, because a two-feature probe cannot be ranked directly; a value near
+   0.5 from a classifier therefore carries the noise described above and is read as "nothing much",
+   not as a measurement to three decimals. The controls are what give them force: the same joint
+   popularity probe reads 0.892 against a uniformly drawn U.
+   These numbers do not gate the stage, because a U whose joint structure matched P's in every
+   respect would **be** P: something must differ and a classifier with enough features will find it.
+   They are reported so that what a model could reach without chemistry is on the page beside what it
+   did reach. Part of the residual is unavoidable: subtracting known positives takes 5.8 % of the
+   top-30 acids' draws and 9.1 % of the top-30 amines', against 0.6–1.2 % for single-partner
+   substrates, because a popular substrate has more known partners to collide with.
+3. **The marginals as an assertion**, per substrate against P's counts, under a tolerance fixed before
+   the run.
+4. **The shuffled-P probe.** Permute P's amine column to get P′, which has P's exact marginals and no
+   real pairing, and fit the same classifier on P′ against U. If it separates P′ from U about as well
+   as it separates P, then what the model learns is not the pairing.
+5. **Determinism**, and a grid image of 20 drawn pairs for a human to confirm they are plausible
+   unreported pairs rather than nonsense (§6).
+
+**Stage U must not** read any benchmark table, read the inventory, or subtract the validation pairs
+from U — that last would use Chemlex labels to build training data. The overlap is counted in stage E
+instead; only 50 of the 2,615 validation pairs have both substrates in the literature at all.
+
+### Stage S2 — the PU models (agreed 2026-10-23)
+
+The method is **the spy technique**, as PAYN used it (ADR 013 item 3): hide a random subset of known
+positives in U, train a classifier on P against U, set the threshold so about 95 % of the spies score
+positive, call everything in U below it a **reliable negative**, and fit the final model on P plus
+those negatives.
+
+**Only the pair model is fitted.** ADR 008 item 5 asked for a substrate-level competitor; under
+matched marginals a one-sided classifier has identical class-conditional inputs and scores **0.5 by
+construction**, so it cannot answer the question. The question already has its answer: B2 sees the
+pair, B3 sees the sides separately, and Owen's bootstrap could not separate them (+0.010, interval
+[−0.070, +0.084]). On this data the pair cannot be shown to matter, and that is reported as the result
+it is (ADR 015 item 3).
+
+**Two sub-steps, two tables,** because the reliable negatives are the part most in need of auditing.
+**S2a** fits the spy classifier and writes one row per U pair and per spy with its score and its flag;
+**S2b** fits the final model on P plus those rows and writes the stage S score layout.
+
+**Spy scores are taken out of fold** (5 folds), with in-sample run beside it as a secondary
+configuration (ADR 016 item 1). A spy sits in its own training set labelled unlabeled, so a flexible
+learner can partly memorise it; every U row is in there with the same label, so the direction of the
+contamination is **not known and not bounded**. Out of fold removes the question instead of answering
+it, and the in-sample run makes the size of PAYN's choice a measurement rather than an assumption.
+
+**A plain P-against-U classifier runs as a secondary control** (ADR 016 item 2): the same classifier
+with no spies and no threshold, its raw score used as a ranking. It answers what the spy step bought,
+which nothing else can.
+
+**Features are the fingerprint and nothing else.** ADR 008 item 1: hand-written chemistry lives in a
+baseline and in the reporting, never in the model. The ten descriptors, the amine subclasses and
+`n_heavy_atoms` are all out, and the only legal `feature_block` values are `morgan_centre` (primary,
+ADR 014 item 2) and `morgan` (secondary). Each block gets its own full run, spies included, because
+the reliable negatives depend on the block. Nothing is one-hot encoded: `a_subclass` is null for all
+11,796 acids by design, so encoding it would add a constant column that looks informative.
+
+**The learner** is `HistGradientBoostingClassifier` — scikit-learn is already a dependency and our
+matrix has no categorical columns at all, so CatBoost's distinctive strengths do not apply (ADR 013
+item 3). **`early_stopping` is written out as `false`** with a fixed `max_iter`: scikit-learn
+otherwise enables it above 10,000 rows and carves an internal validation split with its own seed, and
+our training set is about 287,000 rows. That is a tuning decision taken by the library on data we
+chose with a seed we did not set, which §5 calls hidden state (ADR 016 item 3). `learner` is a
+recorded value and not a branch; any other value raises.
+
+**Config** in `configs/models/`, hashed into every row: `model`, `feature_block`, `p_width: all`,
+`unlabeled` (the U config stem), `spy_fraction`, `spy_recall: 0.95`, `spy_scoring`
+(`out_of_fold` | `in_sample`), `n_folds`, `learner`, `learner_params`, `seed`.
+
+**S2a output.** `<root>/pu/<class>/<config-stem>.negatives.parquet`, open like U. Columns: the four
+pair keys, `in_p` (true for a spy), `fold`, `spy_score` (float32), `reliable_negative`, `threshold`,
+plus `model`, `feature_block`, `seed`, `config_sha256`, `std_version`, `licence`. Its report is the
+audit record: spies, configured and realised recall, both thresholds, the number of reliable negatives
+and their share of U, the spy and U score deciles, and **the shift the selection introduces** — the
+marginal distance of the reliable negatives against U as a whole, their mean heavy-atom count against
+U's, their single-partner share. U was built to match P's marginals and the threshold breaks that
+match on purpose; how far it breaks it is the number a later reader will want.
+
+**S2b output** is the stage S layout unchanged, so stage E keeps reading one table. **Reported beside
+every model** (ADR 008 item 7): the adversarial ROC-AUC of the block actually used, per role, with its
+bootstrap interval and its size-adjusted value — the estimate rests on 11,203 literature-only acids
+against 189 lab-only ones, intervals about ±0.04, so a gap under 0.04 is not a gap (ADR 012 item 2) —
+the mean heavy-atom count of each scored set, and the pointer to B7.
+
+**Stage S2 must not** compute a metric against a benchmark label, read a label or any `test.parquet`,
+choose between configurations, or search hyperparameters. The strata, the comparisons and every
+interval are stage E. The evaluation is ADR 008 item 6, a pre-registration, and is not touched.
+
+**Verification,** tests first on hand-written open rows: a spy set whose threshold can be computed by
+hand; a planted separable case where the reliable negatives must be exactly the planted ones; a matrix
+that must contain no descriptor column, and an input carrying one, which must raise; realised spy
+recall equal to 0.95 under the written tie rule; two runs identical.
+
 
 ## Sources
 
