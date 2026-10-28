@@ -5,6 +5,137 @@ interpretation → next. Every number can be regenerated with the commands in it
 
 ---
 
+## 2026-10-28 — Stage U built: the unlabeled space for amide coupling, after five decision records written before it existed
+
+**Context.** The first commit landed on 2026-10-23. Since then I planned the whole of stage S2 and locked it in five decision records, written before any of it existed. Once a model has been fitted, a choice about how to judge it is no longer a choice.
+
+- **ADR 013** fixes the shape of U: drawn from literature substrates, P subtracted on flat keys, the spy technique, both fingerprints, B8 declared.
+- **ADR 014** fixes the order methods are tried in. PAYN is primary, the others are secondary. A secondary that wins is a finding, not a substitution. It names `morgan_centre` the primary feature block.
+- **ADR 015** replaced the sampler after measurement (below).
+- **ADR 016** makes the spy step cross-fitted. It also turns off a hidden validation split that the learner would otherwise have enabled by itself above 10,000 rows.
+- **ADR 017** demotes a probe from a gate to a diagnostic.
+
+**Done.**
+- Counted the class-wide cross-product and how often each molecule is reported.
+- Found that matching per-role marginals is not enough, and replaced the sampler.
+- Built stage U: `src/platepu/positives/unlabeled.py`, `scripts/unlabeled_literature.py`, `configs/models/unlabeled_literature_k10.yml`, and `tests/test_unlabeled_literature.py`, written first (47 tests collected now; see Result).
+- Ran it on the real amide-coupling data.
+
+**Result.**
+
+The size of the space. Command:
+
+    uv run python scripts/unlabeled_literature.py amide_coupling ~/University/Phd/Dataset/Datasets/derived \
+        --config configs/models/unlabeled_literature_k10.yml
+
+The roots differ on purpose: this script takes `.../Datasets/derived`, the count scripts below take `.../Datasets` and join `derived` themselves. Copying one root into the other command gives a missing-file error.
+
+The table is read from the `positives` block of the report this command writes (`derived/unlabeled/amide_coupling/unlabeled_literature_k10.report.json`). Three rows are arithmetic on that block, not fields in it.
+
+| | n | from the report |
+|---|---|---|
+| acids | 11,543 | `acids` |
+| amines | 9,959 | `amines` |
+| class-wide cross-product | 114,956,737 | 11,543 × 9,959 |
+| positives | 28,158 | `pairs` |
+| acids in exactly one reported pair | 67.4 % | 7,785 / 11,543 (`single_partner_acids`) |
+| amines in exactly one reported pair | 67.3 % | 6,704 / 9,959 (`single_partner_amines`) |
+
+U has to be sampled. A uniform draw would let a classifier separate P from U by how often a molecule is reported, not by whether the pair fits. That is the provenance problem of ADR 008 in a different feature.
+
+The size finding. The literature is disassortative in size: a complex fragment is coupled to a simple building block. Command (section 1 of its output; the independent-draw rows are section 2):
+
+    uv run python scripts/counts/count_u_probes.py ~/University/Phd/Dataset/Datasets
+
+| | value |
+|---|---|
+| corr(size_acid, size_amine) in P | −0.388 |
+| same in U, both sides drawn independently | +0.001 |
+| classifier on the two heavy-atom counts, independent draw | 0.640 |
+| B2 for comparison — not from this script, see below | 0.632 |
+| B7 for comparison — not from this script, and from nothing committed | 0.598 |
+
+B2 (0.632) is printed by `scripts/counts/count_b2_vs_b3.py`, under the heading "is B3's equal AUC at both P widths one vector or two?" (the line `B6 0.822 vs B2_class 0.632`):
+
+    uv run python scripts/counts/count_b2_vs_b3.py ~/University/Phd/Dataset/Datasets
+
+B7 (0.598) has no committed command. ADR 010 keeps metrics against a benchmark label out of the stage report, and only the B2-versus-B3 question got a published comparison script, so this AUC exists only in a run nobody can repeat.
+
+The decile numbers I quoted here earlier (0.510 and −0.390) came from a prototype sampler; the checks table below carries the measured ones.
+
+Stage U on the real data. Command:
+
+    uv run python scripts/unlabeled_literature.py amide_coupling ~/University/Phd/Dataset/Datasets/derived --config configs/models/unlabeled_literature_k10.yml
+
+| | value |
+|---|---|
+| draws | 274,534 |
+| pairs kept | 253,896 |
+| rejected | 2.50 % |
+| time | 2.6 s |
+| substrates absent from U | 0 |
+
+Checks on that run (same command; the diagnostics come from the script's report):
+
+| check | role | value |
+|---|---|---|
+| rank-AUC of one side's raw literature frequency | gate | 0.5036 |
+| joint popularity probe | diagnostic | 0.539 |
+| joint size probe | diagnostic | 0.489 |
+| U's size correlation | diagnostic | −0.373 (P: −0.388) |
+| joint popularity probe on a uniformly drawn U | reference | 0.908 |
+
+Tests. The agent that wrote them had first checked them against a throwaway reference sampler kept outside the repository. That caught two tolerances of its own that were wrong. The count now:
+
+    uv run pytest tests/test_unlabeled_literature.py --collect-only
+
+| | n |
+|---|---|
+| tests collected | 47 |
+| of those, `def test_` functions | 40 (the rest are parametrised cases) |
+| of those, written for the two defects below, before the fix | 4 |
+
+**Interpretation.** I nearly stopped once the per-role marginals matched. That closes the popularity shortcut, but a model could reach 0.640 on two heavy-atom counts having learned no chemistry. The spy threshold would then pick as "reliable negatives" the pairs whose sides are similar in size, which is a publishing habit. Replacing one side at a time from the same decile removes that.
+
+The part worth keeping: three times in this one verification I set up the instrument wrongly, not the thing being measured.
+
+1. I first wrote the size probe as the sum of the two sides. The sum reads 0.498 even on a U I knew was broken, because anti-correlated sizes sum to about the same as uncorrelated ones. A probe that cannot fail is not a check.
+2. I set "the popularity probe must read about 0.5" as a pass criterion. No correct sampler can meet it. A U whose joint structure matched P's in every respect would be P, so something must differ, and a classifier with enough features will find it. Closing the size axis only made the degree axis visible. Stratifying that would reveal a third and remove real chemistry each time. This is why ADR 017 makes it a diagnostic. The 0.908 on a uniform U is what gives the 0.539 its meaning.
+3. I measured the gate with a classifier on one monotone feature. On this draw it returned 0.3758, an AUC below 0.5 on a feature whose own rank-AUC is 0.5036. Classes are at 1:9.7 and the distributions are nearly identical, so there was nothing to fit and it fitted fold noise. The gate is the rank-AUC of the feature itself. A model belongs only where a probe has more than one feature and cannot be ranked. (Command: the one above, section 4 of its output.)
+
+Why the numbers moved. The first figures (+0.003, 0.377, 0.892, 0.538, 0.493) came from probes in `scratch/` that I have since deleted. The script published in `6a58b84` (ADR 011) is now the only instrument for the probes, and every probe figure here is one it prints. The other tables name their own command, the one exception being B7's AUC above, which has none. From here a number without a committed command counts as not reproduced. It is the same lesson as the 0.984 in ADR 008.
+
+Each time I was about to conclude something about the data that was a property of the instrument. I wrote that into the design, not only the number.
+
+**Two defects in commit `3c80ac7`.** I caught both just after it went in.
+
+1. `_pools` raises `KeyError: nan` instead of a named error when `pd.qcut` cannot bin the sizes. This happens when every substrate of a role has the same heavy-atom count, or when a substrate in the feature table has a NaN `n_heavy_atoms`. The existing `missing` check does not catch the second case.
+2. `subtract_p_on` is parsed into the config and never read. The keys are hard-coded in `SIDES`, so a config saying `key_stereo` would run and silently subtract on flat keys.
+
+The fix is written and green, tests first (the 4 tests above failed before it). I am not making the key functional. Stereo subtraction is a case the data does not have (CLAUDE.md §8).
+
+- `src/platepu/positives/unlabeled.py` gained a `SUBTRACT_ON = "key_flat"` constant.
+- `unlabeled_pairs` refuses any other `subtract_p_on`, next to the existing `match` refusal.
+- `_pools` has a guard that raises `ValueError` naming the role's column and how many substrates fell in no bin.
+- That one check covers both causes, a constant heavy-atom count and a NaN `n_heavy_atoms`. This is why there is no separate branch for the missing-size case.
+
+Gate after the fix:
+
+| gate | result |
+|---|---|
+| `uv run ruff check .` | passed |
+| `uv run ruff format --check .` | 124 files already formatted |
+| `uv run mypy src scripts` | success, 51 source files |
+| `uv run pytest` | 411 passed, 1 skipped |
+
+This is the third time this month that a check turned out to be decorative, after "the gate was a docstring".
+
+**Next.**
+- Stage S2: the spy step and the first PU model.
+- Still open, on purpose: the five known positives in the inventory U under flat keys, and the positives table still deduplicated on stereo keys.
+
+---
+
 ## 2026-10-23 — Review and optimisation pass before the first commit: a yield filter that passed every missing yield, a faster B2, an ADR number that does not reproduce
 
 **Context.** Nothing is committed yet. Before the first commit I ran four reviews in parallel: a full project code review, a silent-failure hunt, a performance review and a comment-accuracy review. This entry records what they found and what I changed.
