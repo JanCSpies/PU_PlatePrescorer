@@ -31,6 +31,7 @@ import yaml
 from platepu.io import strictest_licence
 
 MATCH = "size_stratified_one_side"
+SUBTRACT_ON = "key_flat"
 # The pair columns U carries, in output order.
 SIDES = (("a", "key_a_stereo", "key_a_flat"), ("b", "key_b_stereo", "key_b_flat"))
 
@@ -49,7 +50,9 @@ class UnlabeledConfig:
             item 8).
         subtract_p_on: ``"key_flat"``. The fingerprints are chirality-blind and isotope-blind, so
             two stereo variants are one input to the model and a drawn pair that is a positive
-            under another drawing is a positive.
+            under another drawing is a positive. Any other value raises: subtracting on stereo
+            keys is not implemented, and a config that asked for it used to run and subtract on
+            flat keys anyway.
         match: The sampling rule. One value is implemented; anything else raises rather than
             silently falling back.
         gate_rank_auc_tolerance: How far the rank-AUC of one side's raw P frequency may sit from
@@ -119,12 +122,18 @@ def unlabeled_pairs(
         rejected row per rejected draw.
 
     Raises:
-        ValueError: the positives mix ``std_version``; ``config.match`` is not implemented; or a
-            positive's substrate is missing from ``substrates``.
+        ValueError: the positives mix ``std_version``; ``config.match`` or
+            ``config.subtract_p_on`` is not implemented; a positive's substrate is missing from
+            ``substrates``; or a role's sizes cannot be binned.
     """
     if config.match != MATCH:
         raise ValueError(
             f"match {config.match!r} is not implemented; expected {MATCH!r}"
+        )
+    if config.subtract_p_on != SUBTRACT_ON:
+        raise ValueError(
+            f"subtract_p_on {config.subtract_p_on!r} is not implemented; "
+            f"expected {SUBTRACT_ON!r}"
         )
     kept = positives[positives["family"] == config.p_width]
     versions = sorted(set(kept["std_version"]))
@@ -184,6 +193,16 @@ def _pools(
         )
     heavy = size.reindex(counts.index)
     labels = pd.qcut(heavy, bins, labels=False, duplicates="drop")
+    # A label is NaN when every substrate of this role shares one heavy-atom count, so all the
+    # quantile edges collapse, or when one of them carries no count at all -- which the `missing`
+    # check above does not see, because the substrate is in the table and only its size is absent.
+    # Either way the replacement pool is undefined; without this the draw died on `KeyError: nan`.
+    if labels.isna().any():
+        raise ValueError(
+            f"the size distribution of {keys.name} could not be binned into {bins} quantiles: "
+            f"{int(labels.isna().sum())} of {len(labels)} substrates fall in no bin, either "
+            "because the role has a single heavy-atom count or because n_heavy_atoms is missing"
+        )
     pools = {}
     for label in pd.unique(labels):
         members = counts.index[labels == label].to_numpy()

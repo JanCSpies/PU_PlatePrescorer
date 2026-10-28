@@ -387,6 +387,44 @@ def test_a_positive_substrate_missing_from_the_feature_table_raises() -> None:
         unlabeled_pairs(LOPSIDED_P, substrates, make_config())
 
 
+def test_pools_refuses_a_single_size() -> None:
+    """Every acid has 10 heavy atoms, so the quantile edges collapse and no bin is left; the error
+    names the acid column instead of the bare ``KeyError: nan`` it ended in."""
+    positives = positives_table([(f"a{i}", f"n{i}") for i in range(5)])
+    sizes = {f"a{i}": 10 for i in range(5)} | {f"n{i}": 5 + i for i in range(5)}
+    with pytest.raises(ValueError, match="key_a_stereo.*binned"):
+        unlabeled_pairs(positives, substrate_table(sizes), make_config(size_bins=10))
+
+
+def test_pools_refuses_a_missing_heavy_atom_count() -> None:
+    """The amine is in the feature table but its heavy-atom count is NaN; the missing-substrate
+    check does not see it, and the error must name the amine column."""
+    positives = positives_table([(f"a{i}", f"n{i}") for i in range(5)])
+    sizes = {f"a{i}": 5 + i for i in range(5)} | {f"n{i}": 5 + i for i in range(5)}
+    substrates = substrate_table(sizes)
+    substrates["n_heavy_atoms"] = substrates["n_heavy_atoms"].astype(float)
+    substrates.loc[substrates["key_stereo"] == "n2", "n_heavy_atoms"] = np.nan
+    with pytest.raises(ValueError, match="key_b_stereo.*binned"):
+        unlabeled_pairs(positives, substrates, make_config(size_bins=2))
+
+
+def test_unlabeled_refuses_stereo_subtraction() -> None:
+    """Subtraction is on the flat key only; a config asking for another key must not run on flat
+    keys anyway."""
+    with pytest.raises(ValueError, match="key_stereo.*key_flat"):
+        unlabeled_pairs(
+            LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(subtract_p_on="key_stereo")
+        )
+
+
+def test_unlabeled_accepts_flat_subtraction() -> None:
+    """The production value still runs."""
+    unlabeled, _ = unlabeled_pairs(
+        LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(subtract_p_on="key_flat")
+    )
+    assert len(unlabeled) > 0
+
+
 def test_load_unlabeled_config_reads_the_yaml(tmp_path: Path) -> None:
     path = tmp_path / "k10.yml"
     path.write_text(
