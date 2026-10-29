@@ -5,6 +5,66 @@ interpretation → next. Every number can be regenerated with the commands in it
 
 ---
 
+## 2026-10-29 — Can the interaction concordance index be the information axis? I counted: no
+
+The day's third entry. The first two are below it and I do not edit them.
+
+**Context.** I read Pahikkala et al. today (note: `docs/literature/notes/pahikkala-2025-interaction-concordance-index.md`). Their interaction concordance index works on a complete 2×2 design, two acids by two amines with all four outcomes observed. It ignores the per-side main effects, and Proposition 1 proves that an additively separable predictor scores exactly 0.5. Our information axis is plain ROC-AUC and has no such property. So I asked whether the measure can be computed on our data. Both counting scripts are in `scratch/` and not published, so the numbers are written out here and in ADR 022.
+
+**Done.**
+- Round one: counted complete 2×2 designs in the literature positives and negatives and in the Chemlex validation split, on flat keys. Checked the method against brute force on a hand-made example and on 70 random cells (seed 0).
+- Round two: objection that a literature design mixes four papers. Counted the designs again at four levels of control.
+- Wrote ADR 022 with the decision and the open items.
+
+**Result.**
+
+    uv run python scratch/count_complete_2x2_designs.py
+
+| | literature | Chemlex validation |
+|---|---|---|
+| acids × amines | 6,138 × 5,015 | 94 × 112 |
+| observed pairs | 12,365 | 2,611 |
+| matrix density | 0.00040 | 0.248 |
+| complete 2×2 designs | 10,495 | 505,865 |
+| admissible, binary | 1,573 | 151,670 |
+| fully crossed | 42 | 5,945 |
+| admissible, continuous | 10,445 | 393,663 |
+
+Literature observed pairs: 11,396 positive plus 1,121 negative, 12,365 after flat keys collapse 152 duplicates. A U row is a missing cell, so U contributes no design. Stereo keys move the counts by 4–7 % (literature) and 1–4 % (Chemlex).
+
+    uv run python scratch/count_2x2_control_levels.py
+
+| level of control | complete | admissible | fully crossed |
+|---|---|---|---|
+| none | 10,495 | 1,573 | 42 |
+| same condition family (HATU/DIPEA/DMF) | 1,035 | 160 | 0 |
+| same `condition_key` | 5,066 | 876 | 27 |
+| same grant-week file (upper bound) | 3,395 | 597 | 21 |
+| index gap ≤ 10 (proxy) | 2,977 | 543 | 17 |
+
+The admissible share barely moves: 15.0 % baseline, 15.5 % family, 17.3 % `condition_key`, 17.6 % file.
+
+Three findings.
+- The document level cannot be measured. ORDerly has no patent id here. `source_document` is a grant-week block, 489 values, one `grant_date` each. So 597 is an upper bound and 543 an unvalidated proxy. Neighbouring reports at index gap 1 share agents and solvents 24 % of the time, a random pair in the same file 3.3 % (seed 0).
+- The 597 designs come from 29 files. The largest holds 227, the top two about 65 %, 10 files hold one design each. 12 of the 21 crossed designs come from one group. 209 acid pairs hold the 597, 98 of them one design each. All of this is from `scratch/count_2x2_control_levels.py`, the command above — it is the only one of the three scripts that reads `extracted_from_file`, `grant_date`, `yield_kind` or `temperature`, so it is also the source of the 489 grant-week files, the 24 % against 3.3 % adjacency check, the 68 % and 63 % missing temperature and time, and the 5 × 43 and 23 × 11 group shapes. `scratch/count_complete_2x2_concentration.py` gave the baseline concentration instead: 937 acid pairs, 706 with one design, largest 144, over 485 acids and 286 amines.
+- In HATU/DIPEA/DMF there are 160 admissible designs and 0 fully crossed.
+
+Also: `yield_kind` reads "isolated" for every report with a yield, so yield comparability cannot be checked. 68 % of 28,633 kept reports have no temperature, 63 % no time.
+
+**Interpretation.** The measure cannot be the P-versus-U axis. That is the first reason and the sharper one: U has no observed outcome, so there are no designs there, not too few. The second reason is inside the literature: the controlled subset is unmeasurable at the document level, concentrated, and has no unambiguous design in the condition I model. This is a negative result and I record it as one (ADR 022 items 1 and 2).
+
+One lead, not a result. The surviving designs sit in what look like single-patent library tables: 5 acids × 43 amines (159 designs), and 23 acids × 11 amines over 93 cells at 37 % density (12 crossed designs). If that is right, patents hold small dense condition-controlled matrices, close to miniature HTE plates. I did not check the structures and these counts cannot.
+
+Where the measure does fit is evaluation, on Chemlex validation and on the plate, where 151,670 admissible designs under one condition make it well estimated. I recommend that but have not decided it. It changes the pre-registration, so it has to be decided before the plate. ADR 022 item 3.
+
+**Next.**
+- Decide whether IC-index enters the evaluation (ADR 022 item 3), before the plate.
+- Fix the estimator for the primary information axis before looking at any candidate's number (item 4). Candidates from the Viljanen note: Kronecker product pairwise kernel, Poly2D, Gaussian pairwise kernel, boosted tree with capacity.
+- Decide whether `scratch/count_2x2_control_levels.py` is published. It would first need the §3 path fix from ADR 021 item 2.
+- Unexplored: a real patent identifier from raw ORD or USPTO. Nobody has looked.
+
+---
+
 ## 2026-10-29 — Where the validation overlap is removed: nowhere, and `leak_substrate` counted pairs
 
 A second entry for the same day. It is a separate piece of work and it corrects a number in the entry below it, which I do not edit.
