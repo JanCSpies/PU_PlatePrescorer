@@ -3,10 +3,12 @@
 Rows (acid + amine, condition, dynamic bonds, source):
 - r1  A + B, HATU+DIPEA+DMF,       2, orderly, yield 80, 2010  -> P (family and class level)
 - r2  A + B, HATU+DIPEA+DMF+DMAP,  2, uspto,   yield 30, 2005  -> same pair as r1 (extra reagent allowed)
-- r3  C + D, HATU+DIPEA+DMF,       4                            -> rejected: dynamic_bonds
-- r4  succinic acid + B, EDC+DMF,  2                            -> rejected: multiple_groups (two COOH)
-- r5  E + F, EDC+DMF,              2                            -> class level only
-- r6  E + G, EDC+DMF,              2, pistachio (licensed)      -> licensed pair
+- r3  C + D, HATU+DIPEA+DMF,       4, orderly, yield 75         -> rejected: dynamic_bonds
+- r4  succinic acid + B, EDC+DMF,  2, orderly, yield 75         -> rejected: multiple_groups (two COOH)
+- r5  E + F, EDC+DMF,              2, orderly, yield 75         -> class level only
+- r6  E + G, EDC+DMF,              2, pistachio (licensed), yield 75 -> licensed pair
+
+Every row carries a yield well above the production cut-off, so these tests do not depend on it.
 """
 
 import dataclasses
@@ -74,10 +76,10 @@ REACTIONS = pd.DataFrame(
             yield_pct=30.0,
             year=2005,
         ),
-        _row("orderly:3", C, D, HATU, 4),
-        _row("orderly:4", SUCCINIC, B, EDC, 2),
-        _row("orderly:5", E, F, EDC, 2),
-        _row("pistachio:6", E, G, EDC, 2, source="pistachio"),
+        _row("orderly:3", C, D, HATU, 4, yield_pct=75.0),
+        _row("orderly:4", SUCCINIC, B, EDC, 2, yield_pct=75.0),
+        _row("orderly:5", E, F, EDC, 2, yield_pct=75.0),
+        _row("pistachio:6", E, G, EDC, 2, source="pistachio", yield_pct=75.0),
     ]
 )
 BENCHMARK = pd.DataFrame(
@@ -143,7 +145,10 @@ def test_licensed_source_makes_the_pair_licensed(
 def pair_licence(*licences: str) -> str:
     """Licence of the one A + B pair reported once under each given licence."""
     rows = pd.DataFrame(
-        [_row(f"orderly:{i}", A, B, HATU, 2, licence=x) for i, x in enumerate(licences)]
+        [
+            _row(f"orderly:{i}", A, B, HATU, 2, licence=x, yield_pct=75.0)
+            for i, x in enumerate(licences)
+        ]
     )
     positives = build_positives(rows, RULE, CONFIG, BENCHMARK)[0]
     return str(positives[positives["family"] == "all"]["licence"].iloc[0])
@@ -183,9 +188,9 @@ def _leak_counts(benchmark: pd.DataFrame) -> dict[str, int]:
     """Leakage counts of three class-level pairs A+B, E+F, C+G (no family matches the condition)."""
     rows = pd.DataFrame(
         [
-            _row("orderly:1", A, B, ["CCO"], 2),
-            _row("orderly:2", E, F, ["CCO"], 2),
-            _row("orderly:3", C, G, ["CCO"], 2),
+            _row("orderly:1", A, B, ["CCO"], 2, yield_pct=75.0),
+            _row("orderly:2", E, F, ["CCO"], 2, yield_pct=75.0),
+            _row("orderly:3", C, G, ["CCO"], 2, yield_pct=75.0),
         ]
     )
     return build_positives(rows, RULE, CONFIG, benchmark)[2]
@@ -290,3 +295,136 @@ def test_sizes_by_yield_cutoff_count_only_known_yields() -> None:
         "min_yield_10": {"all": 1},
         "min_yield_20": {"all": 1},
     }
+
+
+# --- yield rule (agreed 2026-10-28): usable only in (0, 100] ------------------------------------
+# A yield outside the interval is evidence of neither success nor failure. Zero is outside it on
+# purpose: 6 rows in the class, and a branch for them would be a branch for a case the data lacks.
+# The rows are hand-written; the real-data counts (11,396 / 1,125 / 15,637) belong to the
+# end-to-end run, not here.
+
+CUTOFF_20 = dataclasses.replace(CONFIG, min_yield_pct=20.0)
+NO_CUTOFF = dataclasses.replace(CONFIG, min_yield_pct=None)
+
+
+def _reports(pair: tuple[str, str], *yields: float | None) -> list[dict[str, object]]:
+    """One reaction per yield of the same acid + amine pair (class level, condition ethanol)."""
+    acid, amine = pair
+    return [
+        _row(f"orderly:{acid[:6]}{amine[:6]}{i}", acid, amine, ["CCO"], 2, yield_pct=y)
+        for i, y in enumerate(yields)
+    ]
+
+
+def _reasons(config: object, *yields: float | None) -> list[object]:
+    """Reject reasons of A + B reported once per yield, in order."""
+    rows = pd.DataFrame(_reports((A, B), *yields))
+    rejected = build_positives(rows, RULE, config, NO_OVERLAP)[1]  # type: ignore[arg-type]
+    by_id = dict(zip(rejected["record_id"], rejected["reason"], strict=True))
+    return [by_id.get(record_id, "") for record_id in rows["record_id"]]
+
+
+def _labels(config: object, *reactions: list[dict[str, object]]) -> dict[str, str]:
+    """Label of each pair in ``reported``, keyed by its acid SMILES (one pair per acid here)."""
+    from platepu.positives.build import build_reported
+
+    rows = pd.DataFrame([row for group in reactions for row in group])
+    reported = build_reported(rows, RULE, config)  # type: ignore[arg-type]
+    assert not reported.duplicated(["key_a_stereo", "key_b_stereo"]).any()
+    return dict(zip(reported["substrate_a"], reported["label"], strict=True))
+
+
+def _smiles(acid: str) -> str:
+    return standardize(acid, "substrate", STD).smiles  # type: ignore[return-value]
+
+
+def test_yield_of_exactly_20_is_positive() -> None:
+    """The lower boundary is inclusive: 20 % with a cut-off of 20 is kept and labelled positive."""
+    assert _reasons(CUTOFF_20, 20.0) == [""]
+    assert _labels(CUTOFF_20, _reports((A, B), 20.0)) == {_smiles(A): "positive"}
+
+
+def test_yield_of_exactly_100_is_usable() -> None:
+    """The upper boundary is inclusive: 100 % is a real yield, kept and positive."""
+    assert _reasons(CUTOFF_20, 100.0) == [""]
+    assert _labels(CUTOFF_20, _reports((A, B), 100.0)) == {_smiles(A): "positive"}
+
+
+def test_yield_just_above_100_is_out_of_range() -> None:
+    """100.1 % cannot be a yield; it is rejected with its own reason, not kept."""
+    assert _reasons(CUTOFF_20, 100.1) == ["yield_out_of_range"]
+
+
+def test_yield_of_zero_is_out_of_range_not_negative() -> None:
+    """Luka's decision: a reported 0 % is outside (0, 100], so unusable, and not a negative."""
+    assert _reasons(CUTOFF_20, 0.0) == ["yield_out_of_range"]
+    assert _labels(CUTOFF_20, _reports((A, B), 0.0)) == {_smiles(A): "unlabeled"}
+
+
+def test_out_of_range_beats_below_min_yield() -> None:
+    """np.select takes the first branch that applies. 150 is not below 20 anyway, but -5 is, and
+    the reason must still be yield_out_of_range: the branch goes before below_min_yield."""
+    assert _reasons(CUTOFF_20, 150.0, -5.0) == ["yield_out_of_range"] * 2
+
+
+def test_out_of_range_applies_without_a_cutoff() -> None:
+    """An impossible yield is impossible with min_yield_pct = None as well; 56,524,596 is not kept."""
+    assert _reasons(NO_CUTOFF, 56524596.0, 0.0, 50.0) == [
+        "yield_out_of_range",
+        "yield_out_of_range",
+        "",
+    ]
+
+
+def test_pair_reported_below_and_above_the_cutoff_is_positive() -> None:
+    """15 % and 60 % on one pair: the pair survives on its best report, so it is positive."""
+    assert _labels(CUTOFF_20, _reports((A, B), 15.0, 60.0)) == {_smiles(A): "positive"}
+
+
+def test_pair_rescued_only_by_an_impossible_yield_is_not_positive() -> None:
+    """15 % and 150 %: the 150 is unusable, so nothing shows success and the 15 is not 'every
+    report usable' -- the pair is unlabeled, neither positive nor negative (447 pairs in the data)."""
+    assert _labels(CUTOFF_20, _reports((A, B), 15.0, 150.0)) == {
+        _smiles(A): "unlabeled"
+    }
+
+
+def test_pair_with_every_report_below_the_cutoff_is_negative() -> None:
+    """Two usable reports, 5 % and 15 %, both below 20: a known negative."""
+    assert _labels(CUTOFF_20, _reports((A, B), 5.0, 15.0)) == {_smiles(A): "negative"}
+
+
+def test_pair_with_no_yield_is_unlabeled() -> None:
+    """Nobody recorded a yield: no evidence either way. A single missing report also disqualifies
+    a negative (5 % and unknown)."""
+    assert _labels(CUTOFF_20, _reports((A, B), None)) == {_smiles(A): "unlabeled"}
+    assert _labels(CUTOFF_20, _reports((E, F), 5.0, None)) == {_smiles(E): "unlabeled"}
+
+
+def test_every_reported_pair_gets_exactly_one_label() -> None:
+    """Four pairs -- positive, negative, unlabeled (no yield), unlabeled (only 150) -- each appear
+    once with one label: nothing dropped, nothing double-counted, and the labels add up to the pairs."""
+    from platepu.positives.build import build_reported
+
+    rows = pd.DataFrame(
+        [
+            *_reports((A, B), 80.0),
+            *_reports((E, F), 5.0),
+            *_reports((C, G), None),
+            *_reports((A, F), 150.0),
+        ]
+    )
+    reported = build_reported(rows, RULE, CUTOFF_20)
+    assert len(reported) == 4
+    assert reported["label"].value_counts().to_dict() == {
+        "positive": 1,
+        "negative": 1,
+        "unlabeled": 2,
+    }
+
+
+def test_structurally_rejected_pair_is_absent_from_reported() -> None:
+    """Succinic acid has two COOH (multiple_groups): the pair never reaches the labelled table,
+    whatever its yield."""
+    labels = _labels(CUTOFF_20, _reports((A, B), 80.0), _reports((SUCCINIC, B), 80.0))
+    assert labels == {_smiles(A): "positive"}

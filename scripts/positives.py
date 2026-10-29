@@ -25,6 +25,7 @@ from platepu.io import PRIVATE_SOURCES, source_dir, write_report, write_table
 from platepu.positives.build import (
     PositivesConfig,
     build_positives,
+    build_reported,
     load_positives_config,
 )
 from platepu.standardise.molecule import load_std_config
@@ -62,7 +63,11 @@ def sizes(
 
 
 def write(
-    pairs: pd.DataFrame, rejected: pd.DataFrame, out: Path, root: Path
+    pairs: pd.DataFrame,
+    rejected: pd.DataFrame,
+    reported: pd.DataFrame,
+    out: Path,
+    root: Path,
 ) -> dict[str, object]:
     """Write one positives folder's tables; return their counts for the report."""
     write_table(
@@ -75,9 +80,17 @@ def write(
         out / "positives.rejected.parquet",
         root=root,
     )
+    # Every pair the class reported, labelled. Stage U subtracts all of it so a known reaction
+    # cannot be drawn as unlabeled, and the spy step reads the negatives out of it.
+    write_table(
+        pa.Table.from_pandas(reported, preserve_index=False),
+        out / "reported.parquet",
+        root=root,
+    )
     return {
         "pairs_per_family": dict(Counter(pairs["family"])),
         "rejected": dict(Counter(rejected["reason"])),
+        "reported_per_label": dict(Counter(reported["label"])),
     }
 
 
@@ -115,13 +128,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     for sources, out in runs:
         rows = reactions(args.root, sources, args.name)
         pairs, rejected, leakage = build_positives(rows, rule, config, bench)
+        reported = build_reported(rows, rule, config)
         report = {
             "stage": "positives",
             "class": args.name,
             "sources": sources,
             "reactions_in": len(rows),
             "sizes_by_yield_cutoff": sizes(rows, rule, config, bench),
-            **write(pairs, rejected, out, args.root),
+            **write(pairs, rejected, reported, out, args.root),
             **leakage,
             "seconds": round(time.perf_counter() - start, 1),
         }

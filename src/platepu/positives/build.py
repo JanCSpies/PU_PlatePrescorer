@@ -3,10 +3,15 @@
 Input: standardised reactions of one or more sources (stage 6) with ``source``, ``yield_pct`` and
 ``year`` joined from stage 1. Filters, in order: dynamic bonds not allowed by the class, not exactly
 one product, not exactly two contributing reactants, a substrate without exactly one group of its
-own role or with any group of the other role, yield below the cut-off. Then one row per (class, family, substrate pair)
+own role or with any group of the other role, a yield outside ``(0, 100]``, yield below the
+cut-off, no yield at all. Then one row per (class, family, substrate pair)
 with provenance; ``family = "all"`` is the class level (any condition). Leakage against the
 benchmark keys (stereo-agnostic) is **counted and returned**, never written onto a row: a per-row
 boolean derived from a CC BY-NC-ND benchmark has no place in a table licensed ``open`` (ADR 010).
+
+``build_reported`` writes the second table the cut-off makes necessary: every pair that survives
+the structural filters, whatever its yields, labelled ``positive``, ``negative`` or ``unlabeled``.
+Stage U subtracts all of it, and the spy step reads the negatives.
 """
 
 from collections.abc import Mapping
@@ -23,6 +28,17 @@ from platepu.io import strictest_licence
 from platepu.standardise.molecule import StdConfig, in_family, standardize
 
 PAIR = ["class", "family", "key_a_stereo", "key_b_stereo"]
+# The filters that decide whether a reaction belongs to the class at all, before any yield is read.
+STRUCTURAL_REASONS = (
+    "dynamic_bonds",
+    "n_products",
+    "extra_reactant",
+    "multiple_groups",
+)
+# A yield is evidence only inside this interval. Outside it the number says nothing either way:
+# above 100 it is not a yield, and a reported 0 is far more often an empty field than a measurement.
+MIN_USABLE_YIELD = 0.0
+MAX_USABLE_YIELD = 100.0
 
 
 @dataclass(frozen=True)
@@ -99,24 +115,80 @@ def build_positives(
     return pairs, kept_rejected, leakage
 
 
-def _reject_reasons(
+def build_reported(
     reactions: pd.DataFrame, rule: ClassRule, config: PositivesConfig
-) -> np.ndarray:
-    """The first reason that applies to each reaction, or "" when it is kept."""
-    minimum = config.min_yield_pct
-    no_yield = (
-        reactions["yield_pct"].isna()
-        if minimum is not None
-        else pd.Series(False, index=reactions.index)
+) -> pd.DataFrame:
+    """Every pair reported for the class, labelled by what its yields support.
+
+    Once a cut-off is set, ``build_positives`` writes P alone and the other reported pairs have no
+    home. They are needed twice: stage U must subtract **every** reported pair from the unlabeled
+    draw, not only the ones that became P, or it draws known reactions as if nothing were known
+    about them; and the spy step reads the known negatives, the only real ones the literature gives.
+
+    Args:
+        reactions: Stage-6 rows of ``rule``'s class, as ``build_positives`` takes them.
+        rule: The class (allowed dynamic bonds, role SMARTS).
+        config: The class's positives settings; ``min_yield_pct`` has to be set.
+
+    Returns:
+        One row per ``(key_a_stereo, key_b_stereo)`` surviving the **structural** filters, whatever
+        its yields, with ``label``:
+
+        - ``positive``: at least one report with a usable yield of at least the cut-off;
+        - ``negative``: every report has a usable yield and every one is below the cut-off;
+        - ``unlabeled``: anything else.
+
+        A negative is strict on purpose. One missing or out-of-range report disqualifies it, because
+        a yield nobody recorded, or one reading 56,524,596 %, is not evidence that the pair failed.
+        ``max_yield`` is the largest **usable** yield, so the values the label ignores cannot come
+        back through the column.
+
+    Raises:
+        ValueError: ``config.min_yield_pct`` is None, which leaves every label undefined.
+    """
+    if config.min_yield_pct is None:
+        raise ValueError(
+            "a labelled table needs min_yield_pct, and the class config leaves it null"
+        )
+    structural = np.select(
+        _structural_masks(reactions, rule, config), STRUCTURAL_REASONS, default=""
     )
-    # A reaction with no yield used to survive every cut-off, because the filter was
-    # ``notna() & (yield < minimum)``. "Pairs with a yield of at least 20 %" then also held every
-    # reaction whose yield nobody recorded -- and those counts are what will choose the cut-off.
-    low_yield = (
-        reactions["yield_pct"].notna() & (reactions["yield_pct"] < minimum)
-        if minimum is not None
-        else pd.Series(False, index=reactions.index)
+    kept = reactions[structural == ""].copy()
+    kept["usable_yield"] = kept["yield_pct"].where(_usable(kept["yield_pct"]))
+    reported = (
+        kept.groupby(["key_a_stereo", "key_b_stereo"], sort=False)
+        .agg(
+            key_a_flat=("key_a_flat", "first"),
+            key_b_flat=("key_b_flat", "first"),
+            substrate_a=("substrate_a", "first"),
+            substrate_b=("substrate_b", "first"),
+            n_reports=("record_id", "size"),
+            n_usable=("usable_yield", "count"),
+            max_yield=("usable_yield", "max"),
+            licence=("licence", strictest_licence),
+            std_version=("std_version", "first"),
+        )
+        .reset_index()
     )
+    positive = reported["max_yield"] >= config.min_yield_pct
+    every_report_readable = reported["n_usable"] == reported["n_reports"]
+    reported["label"] = np.select(
+        [positive, every_report_readable & ~positive],
+        ["positive", "negative"],
+        default="unlabeled",
+    )
+    return reported.drop(columns=["n_usable"])
+
+
+def _usable(yield_pct: pd.Series) -> pd.Series:
+    """Whether each yield lies in ``(0, 100]``, the range in which it means anything."""
+    return (yield_pct > MIN_USABLE_YIELD) & (yield_pct <= MAX_USABLE_YIELD)
+
+
+def _structural_masks(
+    reactions: pd.DataFrame, rule: ClassRule, config: PositivesConfig
+) -> list[pd.Series | np.ndarray]:
+    """One mask per entry of ``STRUCTURAL_REASONS``, in that order."""
     counts: dict[
         str, tuple[int, int]
     ] = {}  # molecules repeat a lot: count each once per call
@@ -124,20 +196,40 @@ def _reject_reasons(
         config.single_reactive_group and not _single_group(a, b, rule, counts)
         for a, b in zip(reactions["substrate_a"], reactions["substrate_b"], strict=True)
     ]
+    return [
+        ~reactions["n_dynamic_bonds"].isin(rule.allowed_dynamic_bonds),
+        reactions["n_products"] != 1,
+        reactions["n_reactants"] != 2,
+        np.array(groups, dtype=bool),
+    ]
+
+
+def _reject_reasons(
+    reactions: pd.DataFrame, rule: ClassRule, config: PositivesConfig
+) -> np.ndarray:
+    """The first reason that applies to each reaction, or "" when it is kept."""
+    yields = reactions["yield_pct"]
+    minimum = config.min_yield_pct
+    never = pd.Series(False, index=reactions.index)
+    # A reaction with no yield used to survive every cut-off, because the filter was
+    # ``notna() & (yield < minimum)``. "Pairs with a yield of at least 20 %" then also held every
+    # reaction whose yield nobody recorded -- and those counts are what will choose the cut-off.
     return np.select(
         [
-            ~reactions["n_dynamic_bonds"].isin(rule.allowed_dynamic_bonds),
-            reactions["n_products"] != 1,
-            reactions["n_reactants"] != 2,
-            np.array(groups, dtype=bool),
-            low_yield,
-            no_yield,
+            *_structural_masks(reactions, rule, config),
+            # Before the cut-off, not after it: 56,524,596 % is not "at least 20 %", it is a mass
+            # that landed in the percent field. Appending this branch below ``below_min_yield``
+            # would let every such reaction through as a positive. 709 reactions of this class
+            # carry a yield above 100 and 6 carry a 0, counted 2026-10-28.
+            yields.notna() & ~_usable(yields),
+            yields.notna() & _usable(yields) & (yields < minimum)
+            if minimum is not None
+            else never,
+            yields.isna() if minimum is not None else never,
         ],
         [
-            "dynamic_bonds",
-            "n_products",
-            "extra_reactant",
-            "multiple_groups",
+            *STRUCTURAL_REASONS,
+            "yield_out_of_range",
             "below_min_yield",
             "no_yield",
         ],

@@ -37,5 +37,9 @@ condition_families:
   HATU_DIPEA_DMF: ["CN(C)C(On1nnc2cccnc21)=[N+](C)C", "CCN(C(C)C)C(C)C", "CN(C)C=O"]
 
 positives:
-  min_yield_pct: null   # none for now; P sizes at 0, 10 and 20 % are reported before choosing
+  # A reaction works above 20 % and does not below it (Luka, 2026-10-28). The line is PAYN's own
+  # (JACS 2026, 148, 15066, p. 15069) and the Chemlex paper's on this same class (Nat. Commun.
+  # 2025, 16, 4522, Fig. 5a). Only 5 pairs of 28,158 are reported on both sides of it.
+  # A yield outside (0, 100] is rejected as yield_out_of_range before this cut-off is applied.
+  min_yield_pct: 20
   single_reactive_group: true   # each substrate has one group of its role and none of the other

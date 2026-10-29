@@ -159,7 +159,7 @@ Nothing reads the Chemlex test side.
 | stage | reads | writes | verified by |
 |---|---|---|---|
 | F features | positives (both widths), library, validation | one row per substrate: Morgan counts and reacting-centre descriptors | hand-checked descriptors on 10 substrates; same key gives same row |
-| S scores | features, P choice, U choice, config in `configs/models/` | a score per validation pair and per inventory pair, with seed and config hash | baselines B0 to B7 reproduce the counted AUCs |
+| S scores | features, P choice, U choice, config in `configs/models/` | a score per validation pair and per inventory pair, with seed and config hash | baselines B0 to B8 reproduce the counted AUCs |
 | E evaluation | scores, validation labels | ROC-AUC, PR-AUC, hits at k = 24 / 48 / 96, paired bootstrap differences, by amine class and by substrates in P | the success rule of ADR 006 evaluated once per run |
 
 Splits of P keep one time block (`source_document`) together (ADR 006, item 4); ORDerly has no patent id.
@@ -302,10 +302,17 @@ stage.
 
 ## Open questions
 
-1. **Decided 2026-10-21:** no yield cut-off for P. A cut-off drops a pair reported at 15 % while
-   keeping the 37.6 % that report no yield at all, and it changes P by at most 6.6 % (1,177 pairs
-   with no cut-off, 1,145 at 10 %, 1,099 at 20 %). A 20 % variant is reported once as a robustness
-   line.
+1. **Decided 2026-10-21, reversed 2026-10-29:** P takes a 20 % yield cut-off
+   (`min_yield_pct: 20` in `configs/classes/amide_coupling.yml`, with its three citations). What
+   changed is the definition rather than the arithmetic below: a reaction counts as working at 20 %
+   yield or above, so a pair reported at 15 % becomes a **negative** instead of a discarded row,
+   and a pair with no usable yield becomes **unlabeled** instead of a positive. All three labels
+   are written to `reported.parquet`, and a yield outside (0, 100] is rejected under its own reason
+   (`yield_out_of_range`) before the cut-off is applied. Counts after the rebuild are in the
+   journal, 2026-10-29; at the HATU width P went from 1,177 to 627.
+   The 2026-10-21 reading is kept because the earlier numbers in this file assume it: a cut-off
+   drops a pair reported at 15 % while keeping the 37.6 % that report no yield at all, and it
+   changes P by at most 6.6 % (1,177 pairs with no cut-off, 1,145 at 10 %, 1,099 at 20 %).
 2. **[open, goes to ADR 008 with the S2 inputs]** P:U ratio for the classifiers (PAYN used 1:1; ours
    is ~1:242): subsample U to 1:1 and compare with the full U on validation. Also open there: the U
    composition, and whether catboost is added or scikit-learn's `HistGradientBoostingClassifier` is
@@ -321,7 +328,7 @@ protocol), so Chemlex is the right benchmark.
 Carries out ADR 006 item 5 and ADR 007 item 5. One score per pair and nothing else: no metric is
 computed here (that is stage E) and no label is ever read.
 
-**Two steps.** S1 are the baselines B0 to B7, which fit nothing. S2 are the PU models, which fit a
+**Two steps.** S1 are the baselines B0 to B8, which fit nothing. S2 are the PU models, which fit a
 learner and need a U choice, a P:U ratio and a learner. They are two scripts over one shared
 pair-assembly function, because one stage would need a branch between a pure function of the tables
 and a fit-then-predict, and ADR 006 item 5 runs them weeks apart. They write the same columns, so
@@ -337,16 +344,21 @@ and the validation file, read with an explicit column list so that `label` and `
 never enter the process. The script refuses any file not named `validation.parquet`. A pair whose
 substrate key is missing from the feature table, or a mixed `std_version`, raises `ValueError`;
 coverage was counted at 100 % for all four inputs, so a miss is input we have not seen.
-P has **no yield cut-off** (Luka, 2026-10-21): the cut-off would drop a pair reported at 15 % while
-keeping the 37.6 % of pairs that report no yield at all, and it changes P by 6.6 % at most.
+P takes a **20 % yield cut-off** (Luka, 2026-10-29; the line said "no yield cut-off" from
+2026-10-21 until then, see the open questions above). A pair whose largest usable yield is 20 % or
+above is a positive, below 20 % a negative, and with no usable yield unlabeled; S1 scores the
+positives, as before.
 
-**Output.** `private/scores/<class>/<family>/<model>.parquet` and `.report.json`, under `private/`
+**Output.** `private/scores/<class>/<family>/<stem>.parquet` and `.report.json`, under `private/`
+— `baselines.parquet` for S1, which holds every baseline in one table rather than one file per
+model; the line said `<model>.parquet` until 2026-10-28 and never matched the code —
 because the inventory pairs are internal (ADR 004); every row carries `licence`, so `write_table`
 enforces the path from the column. One row per scored pair: `score_set` (`validation` or
 `inventory`), `key_a_stereo`, `key_b_stereo`, `score` (float32, higher is better, comparable only
 inside one `score_set`), `model`, `feature_block`, `p_width`, `seed`, `config_sha256`,
-`std_version`, `licence`. `feature_block` is `morgan` for B2 and B3, `morgan_centre` for B8, `none`
-for B0, B1 and B4 to B7, and the configured block for a stage S2 model, so one row is one
+`std_version`, `licence`. `feature_block` is `morgan` for B2 and B3, `morgan_centre` for B8, **null**
+for B0, B1 and B4 to B7 — null and not a placeholder string, so a baseline that reads no fingerprint
+cannot be mistaken for one that does — and the configured block for a stage S2 model, so one row is one
 (model, feature block, scored pair) and stage E needs no lookup of which model used what.
 There is **no rank column** (Luka, 2026-10-21). A rank is derived, it is not comparable between
 models, and its meaning depends on a tie convention; stage E and the plate step each compute the
