@@ -88,8 +88,12 @@ def build_positives(
 
     Returns:
         The positives (one row per class, family and pair), the rejected reactions with a reason,
-        and how many **distinct pairs** overlap ``benchmark``, as ``leak_substrate`` (one side is in
-        it) and ``leak_pair`` (both are). The counts are returned rather than written onto the rows:
+        and how many **distinct pairs** overlap ``benchmark``, as ``leak_pairs_one_side`` (one side
+        is in it) and ``leak_pairs_both_sides`` (both are). Both names say "pairs" because both
+        count pairs. They were ``leak_substrate`` and ``leak_pair`` until 2026-10-29, where the first
+        read as a count of molecules; ADR 010 had already fixed the meaning ("the counts now mean
+        distinct pairs"), so the rename only let the name catch up and nothing it decided changes.
+        The counts are returned rather than written onto the rows:
         a per-row boolean saying "this substrate also occurs in Chemlex" is a fact derived from a
         CC BY-NC-ND dataset, and it has no place in a table licensed ``open`` (ADR 010). The count
         is aggregate and cannot be inverted to a substrate, so it stays, because CLAUDE.md §6 asks
@@ -284,11 +288,24 @@ def _pairs(rows: pd.DataFrame) -> pd.DataFrame:
 
 
 def _count_leakage(pairs: pd.DataFrame, benchmark: pd.DataFrame) -> dict[str, int]:
-    """How many distinct pairs overlap ``benchmark``: one side (``leak_substrate``), both (``leak_pair``).
+    """How many distinct pairs overlap ``benchmark``: one side, or both.
 
     Counted on the ``all`` family only, which holds every kept pair exactly once. Counting every row
     would count a pair once per condition family it belongs to, so the old figure was pair-rows and
     not pairs, which is not a number anybody could interpret.
+
+    **Nothing is dropped on the strength of these numbers, and nothing should be.** Filtering P by
+    membership in the benchmark would mean reading the benchmark to decide what may be trained on,
+    which lets the evaluation set choose the training set -- leakage turned around, and harder to
+    see because it looks like caution. The design says the same for stage U (``modeling.md``, stage
+    U: U must not subtract the validation pairs). So these are reported and never enforced.
+
+    They are also **not comparable** with the stage F report's ``overlaps``, which counts substrate
+    keys on *stereo* keys against the family validation split alone, where this counts pairs on
+    *flat* keys against every labelled Chemlex row, the test side included. Two measurements of two
+    different things; ``scripts/unlabeled.py`` holds a third. Reading one against another is a
+    mistake: the 215 pairs counted here are not 215 molecules. ``docs/design/modeling.md`` tabulates
+    all three under "The substrate overlap is reported and never removed".
     """
     if benchmark.empty:
         raise ValueError(
@@ -300,8 +317,8 @@ def _count_leakage(pairs: pd.DataFrame, benchmark: pd.DataFrame) -> dict[str, in
     distinct = pairs[pairs["family"] == "all"]
     one_side = distinct["key_a_flat"].isin(keys_a) | distinct["key_b_flat"].isin(keys_b)
     return {
-        "leak_substrate": int(one_side.sum()),
-        "leak_pair": sum(
+        "leak_pairs_one_side": int(one_side.sum()),
+        "leak_pairs_both_sides": sum(
             pair in both
             for pair in zip(distinct["key_a_flat"], distinct["key_b_flat"], strict=True)
         ),

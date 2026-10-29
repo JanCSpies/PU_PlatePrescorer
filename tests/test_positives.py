@@ -180,8 +180,8 @@ def test_positives_carry_no_benchmark_derived_column() -> None:
     """ADR 009: a per-row flag 'this substrate is in Chemlex' would sit in an open table."""
     result = build_positives(REACTIONS, RULE, CONFIG, BENCHMARK)
     assert len(result) == 3
-    assert not {"leak_substrate", "leak_pair"} & set(result[0].columns)
-    assert set(result[2]) == {"leak_substrate", "leak_pair"}
+    assert not {"leak_pairs_one_side", "leak_pairs_both_sides"} & set(result[0].columns)
+    assert set(result[2]) == {"leak_pairs_one_side", "leak_pairs_both_sides"}
 
 
 def _leak_counts(benchmark: pd.DataFrame) -> dict[str, int]:
@@ -205,7 +205,10 @@ def test_leakage_counts_one_pair_and_three_substrates() -> None:
             "key_b_flat": [key(B), key(D), key(G)],
         }
     )
-    assert _leak_counts(benchmark) == {"leak_substrate": 3, "leak_pair": 1}
+    assert _leak_counts(benchmark) == {
+        "leak_pairs_one_side": 3,
+        "leak_pairs_both_sides": 1,
+    }
 
 
 NO_OVERLAP = pd.DataFrame(
@@ -214,7 +217,7 @@ NO_OVERLAP = pd.DataFrame(
 
 
 def test_empty_benchmark_stops_the_build_instead_of_reporting_zero_leakage() -> None:
-    """No --benchmark-labels, or an empty label file, gave {leak_substrate: 0, leak_pair: 0}: the
+    """No --benchmark-labels, or an empty label file, gave {leak_pairs_one_side: 0, leak_pairs_both_sides: 0}: the
     report then said 'no overlap with Chemlex', indistinguishable from 'checked, none found', and
     CLAUDE.md §6 requires that number. (Until 2026-10-22 this case was pinned as returning zeros.)"""
     empty = pd.DataFrame(columns=["key_a_flat", "key_b_flat"])
@@ -224,9 +227,12 @@ def test_empty_benchmark_stops_the_build_instead_of_reporting_zero_leakage() -> 
 
 def test_benchmark_without_overlap_reports_zero_leakage() -> None:
     """Control: a benchmark that was supplied and shares nothing is a real 'checked, none found'."""
-    assert _leak_counts(NO_OVERLAP) == {"leak_substrate": 0, "leak_pair": 0}
+    assert _leak_counts(NO_OVERLAP) == {
+        "leak_pairs_one_side": 0,
+        "leak_pairs_both_sides": 0,
+    }
     positives = build_positives(REACTIONS, RULE, CONFIG, NO_OVERLAP)[0]
-    assert not {"leak_substrate", "leak_pair"} & set(positives.columns)
+    assert not {"leak_pairs_one_side", "leak_pairs_both_sides"} & set(positives.columns)
 
 
 def test_open_positives_keep_licence_open(built: Built) -> None:

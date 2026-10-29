@@ -78,15 +78,15 @@ def test_positives_table_has_no_leak_columns_and_report_has_the_counts(
         + ["--benchmark-labels", str(benchmark)]
     )
     table = pd.read_parquet(out / "positives.parquet")
-    assert not {"leak_substrate", "leak_pair"} & set(table.columns)
+    assert not {"leak_pairs_one_side", "leak_pairs_both_sides"} & set(table.columns)
     report = json.loads((out / "positives.report.json").read_text(encoding="utf-8"))
-    assert report["leak_pair"] >= 1
-    assert report["leak_substrate"] >= report["leak_pair"]
+    assert report["leak_pairs_both_sides"] >= 1
+    assert report["leak_pairs_one_side"] >= report["leak_pairs_both_sides"]
     assert pq.read_table(out / "positives.parquet").schema.names == list(table.columns)
 
 
 def test_run_without_benchmark_labels_writes_nothing(tmp_path: Path) -> None:
-    """Without --benchmark-labels the report said leak_substrate 0 and leak_pair 0, i.e. 'no overlap
+    """Without --benchmark-labels the report said leak_pairs_one_side 0 and leak_pairs_both_sides 0, i.e. 'no overlap
     with Chemlex', when no overlap was ever checked. The run must stop, before any file is written."""
     prepare(tmp_path)
     with pytest.raises((ValueError, SystemExit)):
