@@ -21,9 +21,9 @@ import numpy as np
 import pandas as pd
 import yaml
 
-ROOT = Path(
-    sys.argv[1] if len(sys.argv) > 1 else "~/University/Phd/Dataset/Datasets"
-).expanduser()
+if len(sys.argv) != 2:
+    raise SystemExit("usage: scripts/counts/count_b2_vs_b3.py <Datasets root>")
+ROOT = Path(sys.argv[1]).expanduser()
 FAMILY = "HATU_DIPEA_DMF"
 RESAMPLES = 2000
 SEED = 20261022

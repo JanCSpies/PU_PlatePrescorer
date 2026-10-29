@@ -30,9 +30,9 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.model_selection import cross_val_score
 
-ROOT = Path(
-    sys.argv[1] if len(sys.argv) > 1 else "~/University/Phd/Dataset/Datasets"
-).expanduser()
+if len(sys.argv) != 2:
+    raise SystemExit("usage: scripts/counts/count_u_probes.py <Datasets root>")
+ROOT = Path(sys.argv[1]).expanduser()
 CLASS = "amide_coupling"
 U_CONFIG = "unlabeled_literature_k10"
 SEED = 20261028
