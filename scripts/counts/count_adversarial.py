@@ -13,31 +13,17 @@ Usage:
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
 
-ROOT = Path(
-    sys.argv[1] if len(sys.argv) > 1 else "~/University/Phd/Dataset/Datasets"
-).expanduser()
-DESCRIPTORS = [
-    "centre_in_ring", "n_alpha", "alpha_n_aromatic", "alpha_n_in_ring", "alpha_max_heavy_degree",
-    "alpha_sum_heavy_degree", "n_heavy_at_2_bonds", "n_heavy_at_3_bonds", "n_ewg_on_ring",
-]  # fmt: skip
+from platepu.features.blocks import block_matrix
+from platepu.score.axes import make_model
+
+if len(sys.argv) != 2:
+    raise SystemExit("usage: scripts/counts/count_adversarial.py <Datasets root>")
+ROOT = Path(sys.argv[1]).expanduser()
 SEED = 20261022
-
-
-def matrix(rows: pd.DataFrame, block: str) -> np.ndarray:
-    """The feature block as a dense float matrix."""
-    if block == "descriptors":
-        return rows[DESCRIPTORS].to_numpy(dtype=float)
-    if block == "descriptors + size":
-        return rows[[*DESCRIPTORS, "n_heavy_atoms"]].to_numpy(dtype=float)
-    if block == "size alone":
-        return rows[["n_heavy_atoms"]].to_numpy(dtype=float)
-    return np.stack([np.asarray(fp) for fp in rows[block]]).astype(float)
 
 
 def main() -> None:
@@ -68,12 +54,13 @@ def main() -> None:
             "morgan_centre",
             "morgan",
         ):
-            features = matrix(used, block)
-            model = (
-                LogisticRegression(max_iter=2000, C=0.1)
-                if features.shape[1] > 100
-                else HistGradientBoostingClassifier(random_state=SEED, max_iter=200)
-            )
+            features = block_matrix(used, block)
+            # The project's one estimator rule, so this published figure and the block ladder it is
+            # read against cannot drift apart. `make_model` fixes `random_state` at 0; the override
+            # keeps this script's own seed, and with it the number it has always printed.
+            model = make_model(features.shape[1])
+            if isinstance(model, HistGradientBoostingClassifier):
+                model.set_params(random_state=SEED)
             auc = cross_val_score(
                 model, features, source, cv=5, scoring="roc_auc"
             ).mean()
