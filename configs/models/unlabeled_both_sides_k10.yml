@@ -1,0 +1,32 @@
+# Stage U, the UNANCHORED control (docs/design/modeling.md; the anchor ablation, 2026-10-29).
+#
+# This is not a production unlabeled space. It exists to answer one question: does a model trained
+# against the anchored U read the anchor rather than the chemistry? The production rule keeps one
+# side of each template pair verbatim, so a model can learn "this acid goes with amines like *that*
+# one" -- which is chemistry, or publishing habit, and the two cannot be told apart by assertion.
+# Chen et al. settled the same question for the DUD-E decoy set by rebuilding the negatives without
+# the construction under suspicion and measuring what moved. This is that rebuild.
+#
+# Identical to unlabeled_literature_k10.yml in every key but `match`, so the comparison is an
+# ablation of exactly one thing. There is no inheritance between configs: all nine keys are repeated
+# here on purpose, and the two files must be changed together.
+k: 10
+seed: 20261028
+# Quantile bins of n_heavy_atoms over the distinct P substrates of each role. Under this rule BOTH
+# replacements come from the bin of the side each replaces, so the literature's size
+# anti-correlation (-0.388) is kept. That is what separates this from the sampler ADR 015 rejected,
+# which drew both sides from the marginals with no size binning and scored 0.640 on two numbers.
+size_bins: 10
+p_width: all
+# Flat keys: the fingerprints are chirality-blind and isotope-blind, so two stereo variants are one
+# input to the model and a drawn pair that is a positive under another drawing is a positive.
+subtract_p_on: key_flat
+match: size_stratified_both_sides
+
+# The gate (ADR 017), unchanged from the production config, and its silence here is the point.
+# It measures per-role marginals only, and a decile-weighted both-sides draw preserves those
+# exactly, so it will pass. That is a property of what the gate looks at, not evidence that the
+# control is sound -- the joint structure the ablation changes is nowhere in it. The report says so.
+gate_rank_auc_tolerance: 0.02
+gate_marginal_tv_multiple: 2.0
+gate_null_draws: 200
