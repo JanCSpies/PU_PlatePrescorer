@@ -5,6 +5,92 @@ interpretation → next. Every number can be regenerated with the commands in it
 
 ---
 
+## 2026-10-29 — Where the validation overlap is removed: nowhere, and `leak_substrate` counted pairs
+
+A second entry for the same day. It is a separate piece of work and it corrects a number in the entry below it, which I do not edit.
+
+**Context.** data-guardian audited today's eight commits and raised one advisory it could not resolve. The stage F report lists overlaps between the positives and the Chemlex validation split (acid 17, amine 6, on stereo keys). The stage P report gives `leak_substrate = 215`. The guardian could not find the code that removes these overlaps from training. If the overlap were unhandled, every validation number measured so far would be contaminated. So I settled this before anything else.
+
+**Done.**
+- repo-scout traced every path through the code. I read `docs/design/` in parallel to compare intent with implementation.
+- Read `src/platepu/positives/build.py` for what `leak_substrate` counts.
+- Renamed the two keys: `leak_substrate` → `leak_pairs_one_side`, `leak_pair` → `leak_pairs_both_sides`.
+- Regenerated the stage P report and checked that both tables are unchanged.
+- Re-measured how many validation pairs have both substrates in P, against the rebuilt P.
+- Wrote the rule into `docs/design/modeling.md`, new subsection under the stage F report, "The substrate overlap is reported and never removed". It is not restated here.
+
+**Result.**
+
+The answer to the guardian. There is no code path that filters P, the library, U, the feature table or the stage S pair assembly by membership in the validation split. Every row is kept and the overlap is only counted. This is intended.
+
+Why. Dropping training rows because they appear in the validation set means reading the validation set to decide what may be trained on. The evaluation set then chooses the training set. That is leakage turned around, and harder to notice because it looks like caution. The design already said this for stage U ("Stage U must not … subtract the validation pairs from U — that last would use Chemlex labels to build training data"). It had never said it for P or F. That gap is why the guardian looked for code that should not exist.
+
+What is enforced is validation against test. Validation is every labelled family row whose flat acid key and flat amine key are both absent from the test side. `scripts/benchmark_split.py` aborts if the two sides share one substrate (0 shared acids, 0 shared amines). Substrates shared between P and validation are a different thing and are allowed. The task is a pair, no validation pair is in P, and a real plate reuses known building blocks in new combinations.
+
+What `leak_substrate` counts. It does not count substrates. `src/platepu/positives/build.py` builds a boolean mask over pairs and sums it. So 215 is the number of P pairs that share at least one substrate with Chemlex, and with all of Chemlex, test side included, not with the validation split. I read the name and not the code, and I reported 215 as substrates. The table "Chemlex leakage, substrates" in the entry below carries the same mistake. That entry stays as it is; this is the correction.
+
+Stage P report with the new keys. Command:
+
+    uv run python scripts/positives.py amide_coupling ~/University/Phd/Dataset/Datasets/derived --sources orderly --benchmark-labels ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/labels.parquet
+
+| key | n |
+|---|---|
+| `leak_pairs_one_side` (was `leak_substrate`) | 215 |
+| `leak_pairs_both_sides` (was `leak_pair`) | 0 |
+
+`positives.parquet` (12,023 rows across families) and `reported.parquet` (28,158 rows) are byte-identical to copies taken before the rename. Check: `pd.testing.assert_frame_equal` on each pair of files. The rename changed a name and nothing else.
+
+Three implementations of "overlap" exist, and they answer three different questions. That is why 215 and 17 / 6 looked contradictory.
+
+| where | key space | unit | measured against |
+|---|---|---|---|
+| stage F, `overlaps` | stereo | substrate keys | the family validation split |
+| stage P, `leak_pairs_*` | flat | pairs | every labelled Chemlex row, test included |
+| `scripts/unlabeled.py`, `share` / `pair_groups` | flat | pairs | the family validation split |
+
+A worked case of the incomparability. At the class width, 21 of 94 validation acids are in P on flat keys, where stage F reports 17 on stereo keys. Flat keys merge stereoisomers, so a flat comparison can only match more. Both numbers are right.
+
+The figure the paper needs: how many validation pairs have both substrates in P at all, read against the rebuilt P. Command:
+
+    uv run python scripts/unlabeled.py amide_coupling HATU_DIPEA_DMF ~/University/Phd/Dataset/Datasets/derived --validation ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/HATU_DIPEA_DMF/validation.parquet
+
+| width of P | both in P | one | neither |
+|---|---|---|---|
+| class, all conditions (what the model trains on) | 18 | 602 | 1,995 |
+| HATU family | 0 | 28 | 2,587 |
+
+Of 2,615 validation pairs. Flat-key substrate overlap at the class width (same command):
+
+| | in P | of |
+|---|---|---|
+| validation acids | 21 | 94 |
+| validation amines | 6 | 112 |
+
+The design document had carried "50 of 2,615" since 2026-10-22. That was measured before the 20 % cut-off took P from 28,158 reported pairs to 11,396 positives. It is 18 now. The same rebuild moved the inventory U from 284,595 pairs to 284,600, and the lab pairs in P from 7 to 2, because a smaller P subtracts less (same command).
+
+Gate after all of it:
+
+    uv run ruff check . && uv run mypy src scripts && uv run pytest
+
+`ruff check` clean, `mypy` 61 files clean, `pytest` 491 passed and 1 skipped.
+
+**Interpretation.**
+
+The overlap is a property of the data to report, not a defect to filter. The model is allowed to know a substrate. It is not allowed to know a validation pair, and it does not. No new ADR is needed. ADR 010 is Accepted and names the old keys, but it already states "The counts now mean distinct pairs", so the rename implements that record and does not reverse it. ADR 010 is left as it is. Its text now names keys that no longer exist, and this entry is the redirect, in the same spirit as ADR 011 item 3.
+
+I renamed `leak_pair` too, although it never misled me. Fixing only the first key would move the trap, not remove it. A reader meeting `leak_pair` beside `leak_one_side` would reasonably assume one counts pairs and the other counts sides.
+
+I considered merging the three overlap implementations into one function and decided against it. It would be tidier and would satisfy §5, but it would touch three stages and their reports and would not produce one new number. The protection is the table above, written into the design document, so that nobody puts two of these figures in one sentence.
+
+The lesson of the day, and it has now happened four times. Today I wrote down a number that the command beside it would not reproduce: B8 at 0.7226 against 0.7221 (a transcription slip); the three descriptor tables in ADR 018 and the comparison in ADR 012 (both measured on a feature table that a rebuild replaced hours later); and now 215 read as molecules when the code counts pairs. Each time I caught it the same way, by running the published command again and not trusting the number beside it. I had treated "every number carries its command" as traceability, a way back to the source. It is a check, and it is worthless unless the command is actually re-run. A number with a command nobody re-runs is as reliable as a number with no command.
+
+**Next.**
+- The information axis for the block selection: PAUC with Owen's pigeonhole bootstrap (ADR 019 item 4), and wiring `score/axes.py` into `scripts/counts/count_adversarial.py`, which the consequences of ADR 018 record as outstanding.
+- `CLAUDE.md` is 203 lines against its own limit of 200. Which rule goes is my call.
+- The anchor ablation still owes its last step: a model trained on U against one trained on U2, scored on Chemlex validation. It cannot be done until stage S2 exists.
+
+---
+
 ## 2026-10-29 — Yield cut-off at 20 %, stages P, U and F rebuilt, B8 implemented, and an anchor ablation that found nothing
 
 Two days of work, one entry, because nothing was committed in between.
