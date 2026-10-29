@@ -28,7 +28,7 @@ are. Each writes a table, a report and, where rows can be dropped, a rejected ta
 | step | code | reads | writes | verified by |
 |---|---|---|---|---|
 | lab library | `library/inventory.py`, `scripts/library.py` | the inventory export (xlsx, header on row 3; internal) and the class YAML | `private/library/<class>.parquet`: one row per compound (by `key_stereo`) with its role, containers, name, CAS; `.rejected.parquet` per container: `no_smiles`, `unparsable`, `neutralise_failed`, `no_inchikey`, `no_role`, `both_roles`, `multiple_groups` | `tests/test_library.py`; full export 10,212 containers → 529 acids, 538 amines |
-| unlabeled U | `library/unlabeled.py`, `scripts/unlabeled.py` | the library, the positives, the benchmark validation set | `private/unlabeled/<class>/<family>.parquet`: every role-A × role-B library pair not in P of the family (by stereo keys); report: overlap of lab and validation substrates with P (flat keys) | `tests/test_unlabeled.py`; 284,595 pairs, 7 lab pairs in P |
+| unlabeled U | `library/unlabeled.py`, `scripts/unlabeled.py` | the library, the positives, the benchmark validation set | `private/unlabeled/<class>/<family>.parquet`: every role-A × role-B library pair not in P of the family (by stereo keys); report: overlap of lab and validation substrates with P (flat keys) | `tests/test_unlabeled.py`; 284,600 pairs, 2 lab pairs in P against the rebuilt P of 2026-10-29 (284,595 and 7 before it) |
 | U literature | `positives/unlabeled.py`, `scripts/unlabeled_literature.py` | the positives at `family = "all"`, the U config | `unlabeled/<class>/<config>.parquet`: one row per drawn counter-pair, one side replaced from the same heavy-atom decile, P subtracted on flat pair keys | `tests/test_unlabeled_literature.py`; the joint size probe at ~0.5 against a uniform-U control |
 | S2a reliable negatives | `score/pu.py`, `scripts/score_pu.py` | features, positives, U, the S2 config | `pu/<class>/<config>.negatives.parquet`: one row per U pair and per spy, with its spy score and whether it is a reliable negative | `tests/test_score_pu.py`; realised spy recall equals the configured 0.95 |
 | S2b PU scores | `score/pu.py`, `scripts/score_pu.py` | features, positives, the S2a negatives, the validation pairs, the inventory grid | the stage S score layout, one row per (model, feature block, scored pair) | two runs identical; B2 and B8 reproduce from the shared pair assembly |
@@ -299,6 +299,62 @@ stage.
   domain-shift record).
 - Per role: rows out, the overlaps between inputs, and the keys with several SMILES.
 - Morgan: max count, mean non-zero bits, and bits never set.
+
+### The substrate overlap is reported and never removed (written down 2026-10-29)
+
+This was decided for stage U from the start and never said for P or F, so data-guardian looked for
+the code that removes the overlap and could not find it. It does not exist, and it should not.
+
+**Why nothing is dropped.** Filtering P, U or the feature table by membership in the validation split
+would mean reading the validation set to decide what may be trained on. That lets the evaluation set
+choose the training set — leakage turned around, and harder to spot because it looks like caution.
+The same sentence already governs stage U below ("Stage U must not … subtract the validation pairs
+from U — that last would use Chemlex labels to build training data"). The overlap is counted, named
+in the report, and carried into the paper as a number.
+
+**What *is* enforced** is validation against **test**: validation is every labelled family row whose
+flat acid key and flat amine key are both absent from the test side, and `scripts/benchmark_split.py`
+aborts if the two sides share one substrate (0 shared acids, 0 shared amines). Substrates shared
+between P and validation are a different thing and are allowed: the task is a *pair*, no validation
+pair is in P, and a real plate reuses known building blocks in new combinations.
+
+**Three measurements, none comparable with another.** This is the trap, and on 2026-10-29 I fell into
+it and reported a count of pairs as a count of molecules:
+
+| where | key space | unit | measured against |
+|---|---|---|---|
+| stage F, `overlaps` | stereo | substrate keys | the family validation split |
+| stage P, `leak_pairs_one_side` / `leak_pairs_both_sides` | flat | **pairs** | every labelled Chemlex row, test side included |
+| `scripts/unlabeled.py`, `share` / `pair_groups` | flat | pairs | the family validation split |
+
+So stage F's 17 acids and 6 amines and stage P's 215 are answers to three different questions, and
+putting two of them in one sentence is a mistake. The stage P keys were `leak_substrate` and
+`leak_pair` until 2026-10-29; both always counted pairs (ADR 010, "the counts now mean distinct
+pairs"), so the rename implements that record rather than changing it. The three implementations are
+left as they are, deliberately: one function would be tidier, but it would touch three stages and
+their reports for no new number.
+
+A worked example of the incomparability, so the point is not abstract: at the class width 21 of 94
+validation acids are in P on **flat** keys, where stage F reports 17 on **stereo** keys. Flat keys
+merge stereoisomers, so a flat comparison can only ever match more. Both numbers are right.
+
+**The figure the paper needs** — how many validation pairs have *both* substrates in P at all — is
+`validation_pairs_by_substrates_in_P_*` in the inventory-U report. Re-read against the rebuilt P on
+2026-10-29:
+
+    uv run python scripts/unlabeled.py amide_coupling HATU_DIPEA_DMF ~/University/Phd/Dataset/Datasets/derived \
+        --validation ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/HATU_DIPEA_DMF/validation.parquet
+
+| width of P | both substrates in P | one | neither |
+|---|---|---|---|
+| class, all conditions (what the model trains on) | **18** | 602 | 1,995 |
+| HATU family | 0 | 28 | 2,587 |
+
+of 2,615 validation pairs; flat-key substrate overlap at the class width is 21 of 94 acids and 6 of
+112 amines. This section carried "50 of 2,615" until 2026-10-29. That figure was measured on
+2026-10-22, before the 20 % cut-off took P from 28,158 reported pairs down to 11,396 positives, and
+it is 18 now. The same rebuild moved the inventory U from 284,595 pairs to 284,600 and the lab pairs
+in P from 7 to 2, because a smaller P subtracts less.
 
 ## Open questions
 
