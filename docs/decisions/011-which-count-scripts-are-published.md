@@ -1,7 +1,7 @@
 # 011 — Which count scripts are published, and what the others are
 
 - **Status:** Accepted, 2026-10-22
-- **Supersedes:** — · **Superseded by:** —
+- **Supersedes:** — · **Superseded by:** 021 in part (item 2, the rest stay in `scratch/`)
 
 ## Context
 
