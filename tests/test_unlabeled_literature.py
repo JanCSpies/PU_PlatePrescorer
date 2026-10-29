@@ -4,16 +4,27 @@ U is drawn from the substrates of the literature positives P, never from the inv
 counter-pair replaces ONE side of a positive pair, from the same heavy-atom bin, weighted by P
 frequency, so U keeps P's per-role popularity (ADR 013) and P's size anti-correlation (ADR 015).
 
+The subtraction set is the **reported** table (every pair the class reported, labelled positive,
+negative or unlabeled; ``build_reported``), not P alone: the yield cut-off moved 16,762 reported
+pairs out of P (1,121 known negatives, 15,641 with no usable yield, counted 2026-10-28) and U must
+still not draw them. The draw pools and frequency weights stay P's.
+
 Cases are hand-written (counted 2026-10-23 in the design, written 2026-10-28), all open, no Chemlex
 and no inventory row. Keys are made-up short strings except where the case is an InChIKey pattern
 (L-/D-alanine as in ``test_benchmark_split.py``; benzoic acid and its 13C and d5 isotopologues,
 two of the five leaks found on 2026-10-23). The flat key of a made-up key is the part before
 the first "-", as the first InChIKey block is.
 
+Section 10 (written 2026-10-29, before the code) pins the second sampling rule,
+``size_stratified_both_sides``: the same U with no anchor, so that "does the model read the anchor?"
+is an ablation of one thing. The one-side rule is pinned there to the draw, so the comparison
+cannot drift.
+
 The scripts' command line is pinned here too: ``unlabeled_literature.py CLASS ROOT --config YAML``.
 """
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -23,13 +34,15 @@ import unlabeled_literature as script_module
 from unlabeled_literature import main as unlabeled_script
 
 from platepu.positives.unlabeled import (
+    MATCH,
     UnlabeledConfig,
     load_unlabeled_config,
     unlabeled_pairs,
 )
 
 STD = "std1"
-MATCH = "size_stratified_one_side"
+ONE_SIDE = "size_stratified_one_side"
+BOTH_SIDES = "size_stratified_both_sides"
 OUTPUT_COLUMNS = [
     "key_a_stereo",
     "key_b_stereo",
@@ -61,7 +74,7 @@ def make_config(**changes: object) -> UnlabeledConfig:
         "size_bins": 1,
         "p_width": "all",
         "subtract_p_on": "key_flat",
-        "match": MATCH,
+        "match": ONE_SIDE,
         "gate_rank_auc_tolerance": 0.02,
         "gate_marginal_tv_multiple": 2.0,
         "gate_null_draws": 200,
@@ -92,6 +105,41 @@ def positives_table(
             "std_version": std_version,
         }
     )
+
+
+def reported_of(positives: pd.DataFrame, *others: tuple[str, str, str]) -> pd.DataFrame:
+    """The reported table matching ``positives`` in the layout of ``build_reported``.
+
+    Every pair of ``positives`` is a ``positive`` row; each ``(acid, amine, label)`` of ``others``
+    is a further reported pair with that label (``negative`` or ``unlabeled``), absent from P.
+    """
+    extra = pd.DataFrame(others, columns=["key_a_stereo", "key_b_stereo", "label"])
+    pairs = positives[["key_a_stereo", "key_b_stereo"]].assign(label="positive")
+    pairs = pd.concat([pairs, extra], ignore_index=True)
+    return pairs.assign(
+        key_a_flat=pairs["key_a_stereo"].map(flat),
+        key_b_flat=pairs["key_b_stereo"].map(flat),
+        substrate_a="smiles_" + pairs["key_a_stereo"],
+        substrate_b="smiles_" + pairs["key_b_stereo"],
+        n_reports=1,
+        max_yield=np.where(pairs["label"] == "positive", 80.0, np.nan),
+        licence="open",
+        std_version=STD,
+    )[
+        [
+            "key_a_stereo",
+            "key_b_stereo",
+            "key_a_flat",
+            "key_b_flat",
+            "substrate_a",
+            "substrate_b",
+            "n_reports",
+            "max_yield",
+            "label",
+            "licence",
+            "std_version",
+        ]
+    ]
 
 
 def substrate_table(sizes: dict[str, int]) -> pd.DataFrame:
@@ -180,7 +228,10 @@ def test_a_counter_pair_replaces_one_side_from_the_same_size_bin() -> None:
     )
     sizes = {"A1": 5, "A2": 6, "A3": 30, "A4": 31, "N1": 5, "N2": 6, "N3": 30, "N4": 31}
     unlabeled, _ = unlabeled_pairs(
-        positives, substrate_table(sizes), make_config(size_bins=2, k=20)
+        positives,
+        reported_of(positives),
+        substrate_table(sizes),
+        make_config(size_bins=2, k=20),
     )
     assert pair_set(unlabeled) == {
         ("A3", "N2"),
@@ -210,7 +261,9 @@ def test_a_replacement_never_comes_from_outside_p() -> None:
             t["key_stereo"].str.startswith("LIB"), "internal", "open"
         )
     )
-    unlabeled, _ = unlabeled_pairs(positives, substrates, make_config(k=50))
+    unlabeled, _ = unlabeled_pairs(
+        positives, reported_of(positives), substrates, make_config(k=50)
+    )
     keys = set(unlabeled["key_a_stereo"]) | set(unlabeled["key_b_stereo"])
     assert keys <= {"A1", "A2", "A3", "N1", "N2", "N3"}
 
@@ -223,7 +276,9 @@ def test_each_substrates_u_share_matches_its_p_share() -> None:
     them 1/31 and 1/23. U keeps those shares to within 25 % relative, per role. Not tighter: a
     popular substrate is also in the most known pairs, so subtracting P takes slightly more of its
     draws (a reference sampler read 0.21 and 0.18 against 0.25 and 0.20 on this small, dense P)."""
-    unlabeled, _ = unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(k=100))
+    unlabeled, _ = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config(k=100)
+    )
     p_acid = p_frequency(LOPSIDED_P, "key_a_stereo")
     p_amine = p_frequency(LOPSIDED_P, "key_b_stereo")
     u_acid = u_frequency(unlabeled, "key_a_stereo")
@@ -234,7 +289,9 @@ def test_each_substrates_u_share_matches_its_p_share() -> None:
 
 def test_total_variation_between_p_and_u_marginals_is_small() -> None:
     """All substrates at once, both roles: half the summed absolute difference of the shares."""
-    unlabeled, _ = unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(k=100))
+    unlabeled, _ = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config(k=100)
+    )
     for column in ("key_a_stereo", "key_b_stereo"):
         p_share = p_frequency(LOPSIDED_P, column)
         u_share = u_frequency(unlabeled, column).reindex(p_share.index, fill_value=0.0)
@@ -243,7 +300,9 @@ def test_total_variation_between_p_and_u_marginals_is_small() -> None:
 
 def test_the_number_of_draws_is_k_times_p_and_rejects_are_not_replaced() -> None:
     """No top-up loop (design, 'No top-up loop'): kept draws never exceed k x |P|."""
-    unlabeled, _ = unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(k=10))
+    unlabeled, _ = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config(k=10)
+    )
     assert 0 < unlabeled["n_draws"].sum() <= 10 * len(LOPSIDED_P)
 
 
@@ -257,9 +316,11 @@ def test_l_and_d_alanine_pair_is_subtracted_from_u_on_the_flat_key() -> None:
     Subtracting on the stereo key would leave all four in U."""
     positives = positives_table([(L_ALANINE, "n1-X"), (D_ALANINE, "n2-X")])
     substrates = substrate_table({L_ALANINE: 6, D_ALANINE: 6, "n1-X": 6, "n2-X": 6})
-    unlabeled, rejected = unlabeled_pairs(positives, substrates, make_config())
+    unlabeled, rejected = unlabeled_pairs(
+        positives, reported_of(positives), substrates, make_config()
+    )
     assert unlabeled.empty
-    assert set(rejected["reason"]) == {"pair_in_p_flat"}
+    assert set(rejected["reason"]) == {"pair_reported_flat"}
     assert pair_set(rejected) >= {(D_ALANINE, "n1-X"), (L_ALANINE, "n2-X")}
 
 
@@ -273,24 +334,130 @@ def test_isotopologue_of_a_positive_acid_is_subtracted_on_the_flat_key(
     substrates = substrate_table(
         {BENZOIC_ACID: 9, isotopologue: 9, "n1-X": 6, "n2-X": 6}
     )
-    unlabeled, rejected = unlabeled_pairs(positives, substrates, make_config())
+    unlabeled, rejected = unlabeled_pairs(
+        positives, reported_of(positives), substrates, make_config()
+    )
     assert unlabeled.empty
     assert (BENZOIC_ACID, "n2-X") in pair_set(rejected)
 
 
 def test_no_pair_in_u_shares_its_flat_key_with_a_positive() -> None:
     """The same rule as a property of a whole run on the lopsided P: zero overlap on flat keys."""
-    unlabeled, _ = unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config())
+    unlabeled, _ = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config()
+    )
     flat_u = set(zip(unlabeled["key_a_flat"], unlabeled["key_b_flat"], strict=True))
     flat_p = set(zip(LOPSIDED_P["key_a_flat"], LOPSIDED_P["key_b_flat"], strict=True))
     assert not flat_u & flat_p
 
 
 def test_rejected_pairs_are_the_known_positives_and_nothing_else() -> None:
-    """The one reason in the design is pair_in_p_flat; a key is never under both roles."""
-    _, rejected = unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(k=50))
+    """The one reason is pair_reported_flat (the set is no longer P); a key is never under both roles."""
+    _, rejected = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config(k=50)
+    )
     assert len(rejected) > 0
-    assert set(rejected["reason"]) == {"pair_in_p_flat"}
+    assert set(rejected["reason"]) == {"pair_reported_flat"}
+
+
+# ---------------------------------------------------------------------- 3b. subtract everything reported
+#
+# The yield cut-off moved pairs out of P into ``reported.parquet``. They are still reported
+# reactions, far more likely to work than a random pair, so U must not draw them (added 2026-10-28).
+# With P = (A1, N1), (A2, N2) and one size bin, the draws are (A1, N1), (A1, N2), (A2, N1), (A2, N2)
+# and k = 20 makes every one of them certain to occur.
+
+TWO_P = positives_table([("A1", "N1"), ("A2", "N2")])
+TWO_SIZES = {"A1": 8, "A2": 8, "N1": 8, "N2": 8, "A9": 8, "N9": 8}
+
+
+def run_two_p(*others: tuple[str, str, str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Stage U on ``TWO_P`` with ``others`` added to its reported table."""
+    return unlabeled_pairs(
+        TWO_P,
+        reported_of(TWO_P, *others),
+        substrate_table(TWO_SIZES),
+        make_config(k=20),
+    )
+
+
+def test_draw_of_a_reported_negative_pair_is_rejected() -> None:
+    """(A1, N2) is a known negative: reported, below the cut-off, not in P. Drawing it would hand
+    the model a reaction the literature says failed as an unlabeled one."""
+    unlabeled, rejected = run_two_p(("A1", "N2", "negative"))
+    assert ("A1", "N2") not in pair_set(unlabeled)
+    held = rejected[
+        (rejected["key_a_stereo"] == "A1") & (rejected["key_b_stereo"] == "N2")
+    ]
+    assert len(held) > 0
+    assert set(held["reason"]) == {"pair_reported_flat"}
+
+
+def test_draw_of_a_reported_unlabeled_pair_is_rejected() -> None:
+    """(A1, N2) was reported with no usable yield (15,641 such pairs). It left P with the cut-off
+    but is still a reported reaction, so a draw of it is the contamination to prevent."""
+    unlabeled, rejected = run_two_p(("A1", "N2", "unlabeled"))
+    assert ("A1", "N2") not in pair_set(unlabeled)
+    held = rejected[
+        (rejected["key_a_stereo"] == "A1") & (rejected["key_b_stereo"] == "N2")
+    ]
+    assert len(held) > 0
+    assert set(held["reason"]) == {"pair_reported_flat"}
+
+
+def test_draw_of_a_positive_pair_is_still_rejected() -> None:
+    """(A1, N2) is in P as well as reported; the old behaviour holds. The control draw (A2, N1)
+    is neither, and stays."""
+    positives = positives_table([("A1", "N1"), ("A2", "N2"), ("A1", "N2")])
+    unlabeled, rejected = unlabeled_pairs(
+        positives,
+        reported_of(positives),
+        substrate_table(TWO_SIZES),
+        make_config(k=20),
+    )
+    assert ("A1", "N2") not in pair_set(unlabeled)
+    assert ("A1", "N2") in pair_set(rejected)
+    assert set(rejected["reason"]) == {"pair_reported_flat"}
+
+
+def test_draw_of_an_unreported_pair_is_kept() -> None:
+    """The control: with only P reported, (A1, N2) and (A2, N1) are in U. Without it the three
+    tests above pass if everything is rejected."""
+    unlabeled, _ = run_two_p()
+    assert pair_set(unlabeled) == {("A1", "N2"), ("A2", "N1")}
+
+
+def test_pools_are_built_from_positives_only() -> None:
+    """A9 is only in a negative row of the reported table and N9 only in an unlabeled one, both
+    the size of every P substrate. If the pools came from the reported table they would be drawn
+    as replacements; U's marginals are matched to P's, so they must never appear."""
+    unlabeled, rejected = run_two_p(("A9", "N1", "negative"), ("A1", "N9", "unlabeled"))
+    assert pair_set(unlabeled) == {("A1", "N2"), ("A2", "N1")}
+    seen = set(rejected["key_a_stereo"]) | set(rejected["key_b_stereo"])
+    assert not seen & {"A9", "N9"}
+
+
+def test_subtraction_is_on_flat_keys() -> None:
+    """P holds (L-ala, n1) and (benzoic, n2). The reported table also holds (D-ala, n2) as an
+    unlabeled pair. The draw (L-ala, n2) has a new stereo pair but the flat key of that reported
+    one, so it is rejected (ADR 013 item 2); (benzoic, n1) is the control that stays."""
+    positives = positives_table([(L_ALANINE, "n1-X"), (BENZOIC_ACID, "n2-X")])
+    substrates = substrate_table({L_ALANINE: 6, BENZOIC_ACID: 6, "n1-X": 6, "n2-X": 6})
+    reported = reported_of(positives, (D_ALANINE, "n2-X", "unlabeled"))
+    unlabeled, rejected = unlabeled_pairs(
+        positives, reported, substrates, make_config(k=20)
+    )
+    assert (L_ALANINE, "n2-X") not in pair_set(unlabeled)
+    assert (L_ALANINE, "n2-X") in pair_set(rejected)
+    assert (BENZOIC_ACID, "n1-X") in pair_set(unlabeled)
+
+
+def test_reported_missing_a_positive_raises() -> None:
+    """Every pair of P is reported by construction. A reported table without two of them is from
+    another run or another cut-off, and U would silently subtract less than it should."""
+    reported = reported_of(LOPSIDED_P).iloc[2:]
+    with pytest.raises(ValueError, match=r"missing 2 of the 40 positive pairs"):
+        unlabeled_pairs(LOPSIDED_P, reported, LOPSIDED_SUBSTRATES, make_config())
 
 
 # ---------------------------------------------------------------------- 4. no self-dedup
@@ -302,7 +469,9 @@ def test_a_pair_drawn_twice_is_one_row_with_n_draws_two_or_more() -> None:
     below their P frequency and reopen the popularity shortcut in reverse (ADR 015 item 2)."""
     positives = positives_table([("A1", "N1"), ("A2", "N2")])
     substrates = substrate_table({"A1": 8, "A2": 8, "N1": 8, "N2": 8})
-    unlabeled, _ = unlabeled_pairs(positives, substrates, make_config(k=10))
+    unlabeled, _ = unlabeled_pairs(
+        positives, reported_of(positives), substrates, make_config(k=10)
+    )
     assert pair_set(unlabeled) == {("A1", "N2"), ("A2", "N1")}
     assert not unlabeled.duplicated(["key_a_stereo", "key_b_stereo"]).any()
     assert unlabeled["n_draws"].min() >= 2
@@ -314,10 +483,10 @@ def test_a_pair_drawn_twice_is_one_row_with_n_draws_two_or_more() -> None:
 
 def test_same_seed_gives_an_identical_frame() -> None:
     first, first_rejected = unlabeled_pairs(
-        LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(seed=3)
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config(seed=3)
     )
     second, second_rejected = unlabeled_pairs(
-        LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(seed=3)
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config(seed=3)
     )
     pd.testing.assert_frame_equal(first, second)
     pd.testing.assert_frame_equal(first_rejected, second_rejected)
@@ -326,9 +495,12 @@ def test_same_seed_gives_an_identical_frame() -> None:
 def test_another_seed_changes_the_rows_but_not_the_marginal_match() -> None:
     """Seed is the only source of randomness; the hot acid share holds to 25 % for both seeds."""
     frames = [
-        unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(k=100, seed=seed))[
-            0
-        ]
+        unlabeled_pairs(
+            LOPSIDED_P,
+            reported_of(LOPSIDED_P),
+            LOPSIDED_SUBSTRATES,
+            make_config(k=100, seed=seed),
+        )[0]
         for seed in (1, 2)
     ]
     assert not frames[0].equals(frames[1])
@@ -344,14 +516,17 @@ def test_another_seed_changes_the_rows_but_not_the_marginal_match() -> None:
 
 def test_a_positive_of_another_family_never_reaches_u() -> None:
     """Only rows with family == p_width are the positives: neither the other family's pair nor its
-    substrates may appear in U, and its pair is not subtracted from it either."""
+    substrates may appear in U. (Its pair is in the class-wide reported table, so it is subtracted
+    there; with no pool it can never be drawn.)"""
     other = positives_table([("hatu_a", "hatu_n")]).assign(family="HATU")
     positives = pd.concat([LOPSIDED_P, other], ignore_index=True)
     substrates = substrate_table(
         {**dict(zip(LOPSIDED_SUBSTRATES["key_stereo"], [10] * len(LOPSIDED_SUBSTRATES))),
          "hatu_a": 10, "hatu_n": 10}
     )  # fmt: skip
-    unlabeled, rejected = unlabeled_pairs(positives, substrates, make_config())
+    unlabeled, rejected = unlabeled_pairs(
+        positives, reported_of(positives), substrates, make_config()
+    )
     keys = set(unlabeled["key_a_stereo"]) | set(unlabeled["key_b_stereo"])
     assert not keys & {"hatu_a", "hatu_n"}
     assert not {"hatu_a", "hatu_n"} & (
@@ -369,14 +544,19 @@ def test_mixed_std_version_in_positives_raises() -> None:
         ignore_index=True,
     )
     with pytest.raises(ValueError, match="std_version"):
-        unlabeled_pairs(positives, LOPSIDED_SUBSTRATES, make_config())
+        unlabeled_pairs(
+            positives, reported_of(positives), LOPSIDED_SUBSTRATES, make_config()
+        )
 
 
 def test_a_match_rule_that_is_not_implemented_raises() -> None:
     """Independent draws are known to carry a 0.640 size shortcut (ADR 015); no flag for them."""
     with pytest.raises(ValueError, match="independent"):
         unlabeled_pairs(
-            LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(match="independent")
+            LOPSIDED_P,
+            reported_of(LOPSIDED_P),
+            LOPSIDED_SUBSTRATES,
+            make_config(match="independent"),
         )
 
 
@@ -384,7 +564,7 @@ def test_a_positive_substrate_missing_from_the_feature_table_raises() -> None:
     """Without its heavy-atom count a substrate has no bin; dropping it would silently thin P."""
     substrates = LOPSIDED_SUBSTRATES[LOPSIDED_SUBSTRATES["key_stereo"] != HOT_A]
     with pytest.raises(ValueError, match=HOT_A):
-        unlabeled_pairs(LOPSIDED_P, substrates, make_config())
+        unlabeled_pairs(LOPSIDED_P, reported_of(LOPSIDED_P), substrates, make_config())
 
 
 def test_pools_refuses_a_single_size() -> None:
@@ -393,7 +573,12 @@ def test_pools_refuses_a_single_size() -> None:
     positives = positives_table([(f"a{i}", f"n{i}") for i in range(5)])
     sizes = {f"a{i}": 10 for i in range(5)} | {f"n{i}": 5 + i for i in range(5)}
     with pytest.raises(ValueError, match="key_a_stereo.*binned"):
-        unlabeled_pairs(positives, substrate_table(sizes), make_config(size_bins=10))
+        unlabeled_pairs(
+            positives,
+            reported_of(positives),
+            substrate_table(sizes),
+            make_config(size_bins=10),
+        )
 
 
 def test_pools_refuses_a_missing_heavy_atom_count() -> None:
@@ -405,7 +590,9 @@ def test_pools_refuses_a_missing_heavy_atom_count() -> None:
     substrates["n_heavy_atoms"] = substrates["n_heavy_atoms"].astype(float)
     substrates.loc[substrates["key_stereo"] == "n2", "n_heavy_atoms"] = np.nan
     with pytest.raises(ValueError, match="key_b_stereo.*binned"):
-        unlabeled_pairs(positives, substrates, make_config(size_bins=2))
+        unlabeled_pairs(
+            positives, reported_of(positives), substrates, make_config(size_bins=2)
+        )
 
 
 def test_unlabeled_refuses_stereo_subtraction() -> None:
@@ -413,14 +600,20 @@ def test_unlabeled_refuses_stereo_subtraction() -> None:
     keys anyway."""
     with pytest.raises(ValueError, match="key_stereo.*key_flat"):
         unlabeled_pairs(
-            LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(subtract_p_on="key_stereo")
+            LOPSIDED_P,
+            reported_of(LOPSIDED_P),
+            LOPSIDED_SUBSTRATES,
+            make_config(subtract_p_on="key_stereo"),
         )
 
 
 def test_unlabeled_accepts_flat_subtraction() -> None:
     """The production value still runs."""
     unlabeled, _ = unlabeled_pairs(
-        LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(subtract_p_on="key_flat")
+        LOPSIDED_P,
+        reported_of(LOPSIDED_P),
+        LOPSIDED_SUBSTRATES,
+        make_config(subtract_p_on="key_flat"),
     )
     assert len(unlabeled) > 0
 
@@ -429,14 +622,14 @@ def test_load_unlabeled_config_reads_the_yaml(tmp_path: Path) -> None:
     path = tmp_path / "k10.yml"
     path.write_text(
         "k: 10\nseed: 20261023\nsize_bins: 10\np_width: all\n"
-        f"subtract_p_on: key_flat\nmatch: {MATCH}\n"
+        f"subtract_p_on: key_flat\nmatch: {ONE_SIDE}\n"
         "gate_rank_auc_tolerance: 0.02\ngate_marginal_tv_multiple: 2.0\n"
         "gate_null_draws: 200\n",
         encoding="utf-8",
     )
     assert load_unlabeled_config(path) == UnlabeledConfig(
         k=10, seed=20261023, size_bins=10, p_width="all",
-        subtract_p_on="key_flat", match=MATCH,
+        subtract_p_on="key_flat", match=ONE_SIDE,
         gate_rank_auc_tolerance=0.02, gate_marginal_tv_multiple=2.0,
         gate_null_draws=200,
     )  # fmt: skip
@@ -447,7 +640,7 @@ def test_load_unlabeled_config_reads_the_yaml(tmp_path: Path) -> None:
 
 def test_output_columns_and_open_licence() -> None:
     unlabeled, rejected = unlabeled_pairs(
-        LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config()
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config()
     )
     assert list(unlabeled.columns) == OUTPUT_COLUMNS
     assert set(unlabeled["licence"]) == {"open"}
@@ -460,7 +653,9 @@ def test_licence_comes_from_the_positives_not_from_the_feature_row() -> None:
     from the open positives alone, so the same substrate stays 'open' here, or the table could
     not be written outside private/ and the publishable training side would vanish."""
     substrates = LOPSIDED_SUBSTRATES.assign(licence="internal")
-    unlabeled, _ = unlabeled_pairs(LOPSIDED_P, substrates, make_config())
+    unlabeled, _ = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), substrates, make_config()
+    )
     assert set(unlabeled["licence"]) == {"open"}
 
 
@@ -470,7 +665,9 @@ def test_licence_is_the_strictest_of_the_positives() -> None:
         [LOPSIDED_P.iloc[:-1], LOPSIDED_P.iloc[[-1]].assign(licence="noncommercial")],
         ignore_index=True,
     )
-    unlabeled, _ = unlabeled_pairs(positives, LOPSIDED_SUBSTRATES, make_config())
+    unlabeled, _ = unlabeled_pairs(
+        positives, reported_of(positives), LOPSIDED_SUBSTRATES, make_config()
+    )
     assert set(unlabeled["licence"]) == {"noncommercial"}
 
 
@@ -481,6 +678,9 @@ def test_script_writes_u_outside_private(tmp_path: Path) -> None:
     (tmp_path / "positives" / "amide_coupling").mkdir(parents=True)
     LOPSIDED_P.to_parquet(
         tmp_path / "positives" / "amide_coupling" / "positives.parquet"
+    )
+    reported_of(LOPSIDED_P).to_parquet(
+        tmp_path / "positives" / "amide_coupling" / "reported.parquet"
     )
     features = tmp_path / "private" / "features" / "amide_coupling"
     features.mkdir(parents=True)
@@ -507,9 +707,9 @@ def test_script_writes_u_outside_private(tmp_path: Path) -> None:
     assert report["draws"]["out"] == int(table["n_draws"].sum())
     assert (
         report["draws"]["requested"]
-        == report["draws"]["out"] + report["draws"]["rejected"]["pair_in_p_flat"]
+        == report["draws"]["out"] + report["draws"]["rejected"]["pair_reported_flat"]
     )
-    assert report["draws"]["rejected"]["pair_in_p_flat"] == len(rejected) > 0
+    assert report["draws"]["rejected"]["pair_reported_flat"] == len(rejected) > 0
     assert str(config) in report["configs"]
 
 
@@ -535,7 +735,9 @@ def test_popularity_probe_separates_p_from_uniform_u_but_not_from_matched_u() ->
     the gate on the full run: there a probe seeing both sides reads about 0.6 against the matched
     U by construction (a U matching P in every joint respect would be P), and only the one-sided
     marginal reads 0.5. The marginal is the gate; the joint probes are reported (ADR 017)."""
-    matched, _ = unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config(k=50))
+    matched, _ = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config(k=50)
+    )
     matched = matched.loc[matched.index.repeat(matched["n_draws"])]
     uniform = uniform_unlabeled(LOPSIDED_P, len(matched), seed=0)
 
@@ -578,7 +780,7 @@ def test_joint_size_probe_u_keeps_the_negative_size_correlation_of_p() -> None:
     joint probes are diagnostics, reported and never pass/fail (ADR 017): size is stratified, the
     degree axis stays visible, and the joint size probe reads about 0.54 there, not 0.5."""
     matched, _ = unlabeled_pairs(
-        BAND_P, BAND_SUBSTRATES, make_config(k=20, size_bins=5)
+        BAND_P, reported_of(BAND_P), BAND_SUBSTRATES, make_config(k=20, size_bins=5)
     )
     matched = matched.loc[matched.index.repeat(matched["n_draws"])]
     independent = uniform_unlabeled(BAND_P, len(matched), seed=0)
@@ -603,7 +805,7 @@ def config_text(**changes: object) -> str:
         "size_bins": 1,
         "p_width": "all",
         "subtract_p_on": "key_flat",
-        "match": MATCH,
+        "match": ONE_SIDE,
         "gate_rank_auc_tolerance": 0.02,
         "gate_marginal_tv_multiple": 2.0,
         "gate_null_draws": 200,
@@ -616,6 +818,9 @@ def write_inputs(root: Path, **changes: object) -> Path:
     """The lopsided P and its feature table under ``root`` as stage U reads them; the config path."""
     (root / "positives" / "amide_coupling").mkdir(parents=True)
     LOPSIDED_P.to_parquet(root / "positives" / "amide_coupling" / "positives.parquet")
+    reported_of(LOPSIDED_P).to_parquet(
+        root / "positives" / "amide_coupling" / "reported.parquet"
+    )
     features = root / "private" / "features" / "amide_coupling"
     features.mkdir(parents=True)
     LOPSIDED_SUBSTRATES.assign(licence="internal").to_parquet(
@@ -632,7 +837,9 @@ def run_script(root: Path, config: Path) -> None:
 
 def measured_gate(config: UnlabeledConfig) -> dict[str, dict[str, float]]:
     """What the script measures on the lopsided P for ``config``, computed outside ``main``."""
-    unlabeled, _ = unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, config)
+    unlabeled, _ = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, config
+    )
     return {
         "acid": script_module.marginals(LOPSIDED_P, unlabeled, "key_a_stereo", config),
         "amine": script_module.marginals(LOPSIDED_P, unlabeled, "key_b_stereo", config),
@@ -648,7 +855,10 @@ def test_a_uniform_u_trips_the_gate_and_nothing_is_written(
     config = write_inputs(tmp_path)
 
     def uniform_sampler(
-        positives: pd.DataFrame, substrates: pd.DataFrame, settings: UnlabeledConfig
+        positives: pd.DataFrame,
+        reported: pd.DataFrame,
+        substrates: pd.DataFrame,
+        settings: UnlabeledConfig,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         return uniform_unlabeled(positives, 400, seed=0), pd.DataFrame()
 
@@ -809,7 +1019,9 @@ def test_the_null_falls_as_p_grows_so_the_gate_scales() -> None:
 
 def test_the_allowed_distance_is_the_multiple_times_the_null() -> None:
     """Doubling the multiple doubles what is allowed, the null being the same stream."""
-    unlabeled, _ = unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config())
+    unlabeled, _ = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config()
+    )
     once = script_module.marginals(LOPSIDED_P, unlabeled, "key_a_stereo", make_config())
     twice = script_module.marginals(
         LOPSIDED_P,
@@ -843,7 +1055,9 @@ def test_the_sampler_sits_below_its_own_null_on_a_sparse_p() -> None:
         {key: 10 for key in {*(a for a, _ in pairs), *(b for _, b in pairs)}}
     )
     config = make_config()
-    unlabeled, _ = unlabeled_pairs(positives, substrates, config)
+    unlabeled, _ = unlabeled_pairs(
+        positives, reported_of(positives), substrates, config
+    )
     for key in ("key_a_stereo", "key_b_stereo"):
         gate = script_module.marginals(positives, unlabeled, key, config)
         assert gate["total_variation"] < gate["null_total_variation"]
@@ -863,7 +1077,9 @@ def test_the_null_is_reproducible_from_the_seed_and_depends_on_it() -> None:
 def test_gate_null_draws_changes_the_floor_and_a_run_repeats_it(tmp_path: Path) -> None:
     """``gate_null_draws`` is read from the config (not a constant): 5 draws and 200 give different
     floors, and the same config twice stamps the same floor in its report."""
-    unlabeled, _ = unlabeled_pairs(LOPSIDED_P, LOPSIDED_SUBSTRATES, make_config())
+    unlabeled, _ = unlabeled_pairs(
+        LOPSIDED_P, reported_of(LOPSIDED_P), LOPSIDED_SUBSTRATES, make_config()
+    )
 
     def floor(config: UnlabeledConfig) -> float:
         return script_module.marginals(LOPSIDED_P, unlabeled, "key_a_stereo", config)[
@@ -872,3 +1088,252 @@ def test_gate_null_draws_changes_the_floor_and_a_run_repeats_it(tmp_path: Path) 
 
     assert floor(make_config()) == floor(make_config())
     assert floor(make_config(gate_null_draws=5)) != floor(make_config())
+
+
+# ---------------------------------------------------------------------- 10. the rule without an anchor
+#
+# Stage U keeps one side of a published pair as an anchor. The ablation asks whether a model reads
+# that anchor instead of the chemistry (the failure Chen et al. documented for the DUD-E decoys), so
+# the second rule must differ from the first in that one respect and no other: both sides are
+# replaced on every draw, each from the size bin of the side it replaces, weighted by P frequency;
+# pools, subtraction of everything reported, rejects and table are unchanged. Written 2026-10-29.
+
+# Two size bins per role, and each P pair joins a template acid to an amine of the other role's bin
+# so that the two rules reach DIFFERENT pairs. Acids: S = {aS1, aS2}, B = {aB1, aB2}; amines the
+# same. Templates: (aS1,bB1) (aS2,bS1) (aB1,bB2) (aB2,bS2). Every substrate is in P once, so every
+# pool is uniform. Replacing one side stays inside the anchor's other bin, replacing both reaches the
+# four pairs below that no one-side draw can make:
+#   from (aS1,bB1): (aS2,bB2)   from (aS2,bS1): (aS1,bS2)
+#   from (aB1,bB2): (aB2,bB1)   from (aB2,bS2): (aB1,bS1)
+CROSSED = [("aS1", "bB1"), ("aS2", "bS1"), ("aB1", "bB2"), ("aB2", "bS2")]
+CROSSED_P = positives_table(CROSSED)
+CROSSED_SIZES = {
+    "aS1": 5, "aS2": 6, "aB1": 30, "aB2": 31,
+    "bS1": 5, "bS2": 6, "bB1": 30, "bB2": 31,
+}  # fmt: skip
+CROSSED_SUBSTRATES = substrate_table(CROSSED_SIZES)
+# Reachable by replacing both sides and by no single-side replacement.
+ONLY_BY_REPLACING_BOTH = {
+    ("aS2", "bB2"),
+    ("aS1", "bS2"),
+    ("aB2", "bB1"),
+    ("aB1", "bS1"),
+}
+# Reachable by replacing one side within its bin (the one-side rule's whole output).
+ONE_SIDE_REACHES = {
+    ("aS1", "bB2"),
+    ("aS2", "bB1"),
+    ("aS2", "bS2"),
+    ("aS1", "bS1"),
+    ("aB1", "bB1"),
+    ("aB2", "bB2"),
+    ("aB2", "bS1"),
+    ("aB1", "bS2"),
+}
+
+
+def crossed_unlabeled(match: str, **changes: object) -> pd.DataFrame:
+    """U of the CROSSED case under ``match``; k = 40 by default, so a pair that a template reaches
+    with chance 1/4 per draw is missed with chance (3/4)^40, about 1e-5, and the fixed seed makes
+    the outcome one fixed table."""
+    settings = {"k": 40, "size_bins": 2, "match": match, **changes}
+    unlabeled, _ = unlabeled_pairs(
+        CROSSED_P,
+        reported_of(CROSSED_P),
+        CROSSED_SUBSTRATES,
+        make_config(**settings),
+    )
+    return unlabeled
+
+
+def test_the_implemented_match_rules_are_exactly_the_two_named_in_the_configs() -> None:
+    """``MATCH`` is the module's own list of rules, imported here so the tests cannot drift from
+    it. The names are the YAML contract, so they are also written out above."""
+    assert set(MATCH) == {ONE_SIDE, BOTH_SIDES}
+
+
+def test_both_sides_rule_replaces_both_substrates() -> None:
+    """The ablation itself. The four pairs in ONLY_BY_REPLACING_BOTH share no substrate with the
+    template they come from, and no one-side draw can make them (shown on the same case under the
+    one-side rule). If both-sides U lacked them it would still be anchored and the experiment
+    would measure nothing.
+
+    A replacement is drawn from a pool that contains the substrate it replaces, so a single draw
+    keeps a side by chance (1/2 here); 'never keeps either' is not the property, 'reaches what an
+    anchor cannot' is."""
+    both = crossed_unlabeled(BOTH_SIDES)
+    one = crossed_unlabeled(ONE_SIDE)
+    assert ONLY_BY_REPLACING_BOTH <= pair_set(both)
+    assert pair_set(one).isdisjoint(ONLY_BY_REPLACING_BOTH)
+
+
+def test_both_sides_replacements_come_from_their_own_decile() -> None:
+    """The acid's replacement is from the acid's bin and the amine's from the amine's. U is then
+    exactly the 12 pairs of the two bins of each template (4 reached by one side, 4 by both, the
+    positives are subtracted): a replacement from one shared pool, or from the wrong role's bin,
+    would put an aB or bS substrate beside a template that has none, and the size structure of P
+    (a small acid with a big amine) would be lost."""
+    both = crossed_unlabeled(BOTH_SIDES)
+    assert pair_set(both) == ONE_SIDE_REACHES | ONLY_BY_REPLACING_BOTH
+
+
+def test_both_sides_draws_both_pools_on_every_draw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """There is no draw % 2 parity for this rule: every draw calls the acid pool with the
+    template's acid and the amine pool with its amine, 2 x k x |P| calls and k x |P| for the
+    one-side rule. Counted at ``_draw`` because the output cannot say which side was replaced."""
+    from platepu.positives import unlabeled as module
+
+    calls: list[str] = []
+    real_draw = module._draw
+
+    def counting_draw(pools: object, key: str, generator: object) -> str:
+        calls.append(key)
+        return real_draw(pools, key, generator)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(module, "_draw", counting_draw)
+    crossed_unlabeled(BOTH_SIDES, k=6)
+    assert len(calls) == 2 * 6 * len(CROSSED)
+    assert sorted(set(calls)) == sorted(CROSSED_SIZES)
+    calls.clear()
+    crossed_unlabeled(ONE_SIDE, k=6)
+    assert len(calls) == 6 * len(CROSSED)
+
+
+# The real shape of P (67 % of substrates reported once, a few popular): three hot acids and three
+# hot amines, 140 singleton pairs, as in test_the_sampler_sits_below_its_own_null_on_a_sparse_p.
+SPARSE = (
+    [(f"hot{i % 3}", f"n{i}") for i in range(30)]
+    + [(f"a{i}", f"hotn{i % 3}") for i in range(30)]
+    + [(f"a{i + 100}", f"n{i + 100}") for i in range(140)]
+)
+SPARSE_P = positives_table(SPARSE)
+SPARSE_SUBSTRATES = substrate_table(
+    {key: 10 for key in {*(a for a, _ in SPARSE), *(b for _, b in SPARSE)}}
+)
+
+
+def test_both_sides_keeps_the_per_role_marginals() -> None:
+    """Each role's U frequencies still track its P frequencies. This matters because the stage
+    gate (ADR 017) measures only per-role marginals: its silence on the both-sides rule is a
+    property of the draw, not an accident, only if this holds.
+
+    The tolerance is not a number of mine. Drawing every side from P's frequencies is a multinomial
+    with P's shares, which is what ``null_total_variation`` simulates, and its 99th percentile is
+    the distance a perfect sampler shows from sampling noise alone; the gate allows
+    ``gate_marginal_tv_multiple`` (2.0) times it, scaled to this P and this number of draws. The
+    both-sides rule has no anchor to beat that noise (the one-side rule sits below it), so it is
+    held to the gate's own line, not to a fixed 0.05. The rank-AUC tolerance of 0.02 is not asserted:
+    with 200 positives the AUC of a perfect sampler has a standard error of about 0.02 itself, so
+    it would test the fixture size and not the sampler (it is the real 28,158-pair P that meets
+    it)."""
+    config = make_config(match=BOTH_SIDES)
+    unlabeled, _ = unlabeled_pairs(
+        SPARSE_P, reported_of(SPARSE_P), SPARSE_SUBSTRATES, config
+    )
+    for key in ("key_a_stereo", "key_b_stereo"):
+        gate = script_module.marginals(SPARSE_P, unlabeled, key, config)
+        assert gate["total_variation"] < gate["total_variation_allowed"]
+
+
+def test_both_sides_is_reproducible_from_the_seed() -> None:
+    first, first_rejected = unlabeled_pairs(
+        LOPSIDED_P,
+        reported_of(LOPSIDED_P),
+        LOPSIDED_SUBSTRATES,
+        make_config(match=BOTH_SIDES, seed=3),
+    )
+    second, second_rejected = unlabeled_pairs(
+        LOPSIDED_P,
+        reported_of(LOPSIDED_P),
+        LOPSIDED_SUBSTRATES,
+        make_config(match=BOTH_SIDES, seed=3),
+    )
+    pd.testing.assert_frame_equal(first, second)
+    pd.testing.assert_frame_equal(first_rejected, second_rejected)
+
+
+def test_both_sides_with_another_seed_gives_another_frame() -> None:
+    frames = [
+        unlabeled_pairs(
+            LOPSIDED_P,
+            reported_of(LOPSIDED_P),
+            LOPSIDED_SUBSTRATES,
+            make_config(match=BOTH_SIDES, seed=seed),
+        )[0]
+        for seed in (1, 2)
+    ]
+    assert not frames[0].equals(frames[1])
+
+
+def test_an_unimplemented_match_rule_lists_what_is_implemented() -> None:
+    """A reader learns the options from the error: both rule names are in it, with the refused
+    value. (The test above, for 'independent', stays: the refusal itself is unchanged.)"""
+    with pytest.raises(ValueError, match="not implemented") as error:
+        unlabeled_pairs(
+            LOPSIDED_P,
+            reported_of(LOPSIDED_P),
+            LOPSIDED_SUBSTRATES,
+            make_config(match="uniform"),
+        )
+    message = str(error.value)
+    assert "'uniform'" in message
+    assert ONE_SIDE in message
+    assert BOTH_SIDES in message
+
+
+# The one-side rule on CROSSED, k = 8, seed 11, size_bins = 2, counted on 2026-10-29 from the code
+# as it stood BEFORE the second rule was added: (acid, amine, n_draws) of the 7 kept pairs, 12 kept
+# draws and 20 rejected (the 32 = 8 x 4 draws). Hard-coded so that adding the second rule cannot
+# quietly change the thing it is compared against.
+ONE_SIDE_ORACLE = [
+    ("aB1", "bS2", 2),
+    ("aB2", "bB2", 2),
+    ("aB2", "bS1", 3),
+    ("aS1", "bB2", 1),
+    ("aS1", "bS1", 1),
+    ("aS2", "bB1", 1),
+    ("aS2", "bS2", 2),
+]
+
+
+def test_the_one_side_rule_is_unchanged() -> None:
+    unlabeled, rejected = unlabeled_pairs(
+        CROSSED_P,
+        reported_of(CROSSED_P),
+        CROSSED_SUBSTRATES,
+        make_config(match=ONE_SIDE, k=8, seed=11, size_bins=2),
+    )
+    kept = list(
+        zip(
+            unlabeled["key_a_stereo"],
+            unlabeled["key_b_stereo"],
+            unlabeled["n_draws"].astype(int),
+            strict=True,
+        )
+    )
+    assert kept == ONE_SIDE_ORACLE
+    assert len(rejected) == 20
+
+
+@pytest.mark.parametrize("match", [ONE_SIDE, BOTH_SIDES])
+def test_a_pair_drawn_more_than_int16_can_hold_raises(match: str) -> None:
+    """Two disjoint positives, one bin: the pair (a0, b1) is half of all one-side draws and a
+    quarter of both-sides draws from each template, 40,000 of 160,000 either way, past the 32,767
+    that ``n_draws`` (int16) holds. Cast silently it wraps negative and U loses weight where it is
+    heaviest; it must raise, naming the pair and the count. Both rules, because the cast is
+    shared."""
+    positives = positives_table([("a0", "b0"), ("a1", "b1")])
+    substrates = substrate_table({"a0": 8, "a1": 8, "b0": 8, "b1": 8})
+    with pytest.raises(ValueError) as error:
+        unlabeled_pairs(
+            positives,
+            reported_of(positives),
+            substrates,
+            make_config(match=match, k=80_000),
+        )
+    message = str(error.value)
+    assert "a0" in message
+    assert "b1" in message
+    assert any(int(n) > 32_767 for n in re.findall(r"\d+", message))

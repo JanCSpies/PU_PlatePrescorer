@@ -104,11 +104,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     positives = pd.read_parquet(
         args.root / "positives" / args.name / "positives.parquet"
     )
+    # Every reported pair, not only P: since the yield cut-off most reported pairs are not
+    # positives, and drawing one of them as unlabeled would seed U with known reactions.
+    reported = pd.read_parquet(args.root / "positives" / args.name / "reported.parquet")
     substrates = pd.read_parquet(
         args.root / "private" / "features" / args.name / "substrates.parquet",
         columns=["key_stereo", "n_heavy_atoms"],
     )
-    unlabeled, rejected = unlabeled_pairs(positives, substrates, config)
+    unlabeled, rejected = unlabeled_pairs(positives, reported, substrates, config)
 
     width = positives[positives["family"] == config.p_width]
     gate = {
@@ -165,7 +168,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "seed": config.seed,
             "requested": config.k * len(width),
             "out": int(unlabeled["n_draws"].sum()),
-            "rejected": {"pair_in_p_flat": len(rejected)},
+            "rejected": {"pair_reported_flat": len(rejected)},
             "pairs_out": len(unlabeled),
         },
         "gate": gate,
