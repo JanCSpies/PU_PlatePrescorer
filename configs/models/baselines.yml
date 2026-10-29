@@ -1,4 +1,4 @@
-# Stage S1: the baselines B0 to B7 (docs/design/modeling.md, "Stage S — scores"; ADR 006 item 5 and
+# Stage S1: the baselines B0 to B8 (docs/design/modeling.md, "Stage S — scores"; ADR 006 item 5 and
 # ADR 007 item 5). None of them fits a parameter, so the only settings are the seed and the scores of
 # B4. Change the seed and B0 changes; change nothing else and a run repeats exactly.
 model: baselines

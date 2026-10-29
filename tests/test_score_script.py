@@ -33,7 +33,8 @@ SUBCLASS = {
     "N1": "aniline", "N2": "aliphatic_primary", "N3": "aniline",
 }  # fmt: skip
 SIZE = {"A1": 8, "A2": 9, "A3": 12, "N1": 7, "N2": 6, "N3": 10}
-MODELS = {"B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"}
+MODELS = {"B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"}
+NO_BLOCK = {"B0", "B1", "B4", "B5", "B6", "B7"}
 
 
 def collect_keys(value: object) -> set[str]:
@@ -67,8 +68,20 @@ def feature_table() -> pa.Table:
     morgan = pa.FixedSizeListArray.from_arrays(
         pa.array(counts.ravel(), pa.uint8()), N_BITS
     )
-    return pa.Table.from_pandas(table, preserve_index=False).append_column(
-        "morgan", morgan
+    centre = counts.copy()
+    centre[1, :4] = [
+        1,
+        1,
+        1,
+        0,
+    ]  # A2 rooted differently from A2 on morgan, so B8 can differ from B2
+    centre_array = pa.FixedSizeListArray.from_arrays(
+        pa.array(centre.ravel(), pa.uint8()), N_BITS
+    )
+    return (
+        pa.Table.from_pandas(table, preserve_index=False)
+        .append_column("morgan", morgan)
+        .append_column("morgan_centre", centre_array)
     )
 
 
@@ -143,8 +156,8 @@ def test_scores_written_under_private(tmp_path: Path) -> None:
     out = run(tmp_path, write_inputs(tmp_path, "validation.parquet"))
     table = pq.read_table(out / "baselines.parquet")
     assert table.column_names == [
-        "score_set", "key_a_stereo", "key_b_stereo", "score", "model", "p_width",
-        "seed", "config_sha256", "std_version", "licence",
+        "score_set", "key_a_stereo", "key_b_stereo", "score", "model", "feature_block",
+        "p_width", "seed", "config_sha256", "std_version", "licence",
     ]  # fmt: skip
     assert table.schema.field("score").type == pa.float32()
     frame = table.to_pandas()
@@ -187,17 +200,68 @@ def test_both_scored_sets_are_read_with_their_licence() -> None:
     assert "licence" in VALIDATION_COLUMNS
 
 
-def test_b2_and_b3_appear_at_both_p_widths_and_the_others_once(tmp_path: Path) -> None:
-    """B2 and B3: p_width is the family and 'all', so two groups each; B0, B1, B4, B5, B6, B7 read
-    no P pair-table width, so one group with a null p_width. 8 models, 10 groups, 5 pairs each."""
+def test_b2_b3_and_b8_appear_at_both_p_widths_and_the_others_once(
+    tmp_path: Path,
+) -> None:
+    """B2, B3 and B8: p_width is the family and 'all', so two groups each; B0, B1, B4, B5, B6, B7 read
+    no P pair-table width, so one group with a null p_width. 9 models, 12 groups, 5 pairs each."""
     out = run(tmp_path, write_inputs(tmp_path, "validation.parquet"))
     frame = pd.read_parquet(out / "baselines.parquet")
-    for model in ("B2", "B3"):
+    for model in ("B2", "B3", "B8"):
         assert set(frame.loc[frame["model"] == model, "p_width"]) == {FAMILY, "all"}
-    for model in MODELS - {"B2", "B3"}:
+    for model in NO_BLOCK:
         assert frame.loc[frame["model"] == model, "p_width"].isna().all()
-    assert len(frame) == 10 * 5
+    assert len(frame) == 12 * 5
     assert (frame.groupby(["model", "p_width"], dropna=False).size() == 5).all()
+
+
+def test_b8_runs_at_both_p_widths(tmp_path: Path) -> None:
+    """B8 is B2's definition on another block, so like B2 it is scored at the family and at 'all',
+    for both sets: 5 pairs at each width."""
+    out = run(tmp_path, write_inputs(tmp_path, "validation.parquet"))
+    frame = pd.read_parquet(out / "baselines.parquet")
+    b8 = frame[frame["model"] == "B8"]
+    assert set(b8["p_width"]) == {FAMILY, "all"}
+    assert (b8.groupby("p_width").size() == 5).all()
+
+
+def test_b8_differs_from_b2_in_the_table(tmp_path: Path) -> None:
+    """The script reads the morgan_centre column for B8: inventory pair (A1,N2) at width 'all'
+    (P = (A1,N1), (A2,N2)) is 1/3 for B2 and 3/5 for B8, because A2 and N2 are rooted differently."""
+    out = run(tmp_path, write_inputs(tmp_path, "validation.parquet"))
+    frame = pd.read_parquet(out / "baselines.parquet")
+    rows = frame[(frame["p_width"] == "all") & (frame["key_a_stereo"] == "A1")]
+    rows = rows[rows["model"].isin(["B2", "B8"]) & (rows["score_set"] == "inventory")]
+    by_model = rows.set_index("model")["score"]
+    assert by_model["B2"] != by_model["B8"]
+
+
+def test_feature_block_is_set_for_the_fingerprint_baselines(tmp_path: Path) -> None:
+    """B2 and B3 read morgan, B8 reads morgan_centre, at both widths and in both sets."""
+    out = run(tmp_path, write_inputs(tmp_path, "validation.parquet"))
+    frame = pd.read_parquet(out / "baselines.parquet")
+    blocks = frame.groupby("model")["feature_block"].agg(set)
+    assert blocks["B2"] == {"morgan"}
+    assert blocks["B3"] == {"morgan"}
+    assert blocks["B8"] == {"morgan_centre"}
+
+
+def test_feature_block_is_null_for_the_rest(tmp_path: Path) -> None:
+    """B0, B1, B4, B5, B6 and B7 read no fingerprint, so feature_block is null: not 'none', not an
+    empty string, nothing that reads as a block name."""
+    out = run(tmp_path, write_inputs(tmp_path, "validation.parquet"))
+    frame = pd.read_parquet(out / "baselines.parquet")
+    for model in NO_BLOCK:
+        assert frame.loc[frame["model"] == model, "feature_block"].isna().all()
+
+
+def test_score_table_columns_are_the_documented_order(tmp_path: Path) -> None:
+    """docs/design/modeling.md "Output": feature_block sits between model and p_width."""
+    out = run(tmp_path, write_inputs(tmp_path, "validation.parquet"))
+    assert pq.read_table(out / "baselines.parquet").column_names == [
+        "score_set", "key_a_stereo", "key_b_stereo", "score", "model", "feature_block",
+        "p_width", "seed", "config_sha256", "std_version", "licence",
+    ]  # fmt: skip
 
 
 def test_two_runs_give_equal_tables(tmp_path: Path) -> None:

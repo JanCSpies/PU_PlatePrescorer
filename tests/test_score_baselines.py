@@ -1,4 +1,4 @@
-"""Tests for platepu.score.baselines B0 to B7 (docs/design/modeling.md, "Stage S - scores").
+"""Tests for platepu.score.baselines B0 to B8 (docs/design/modeling.md, "Stage S - scores").
 
 Every fixture is made up and worked out by hand on 2026-10-21. Fingerprints are bit sets chosen so
 a Tanimoto is a fraction of small integers: |intersection| / |union| of the set bits (counts > 0).
@@ -7,9 +7,12 @@ a Tanimoto is a fraction of small integers: |intersection| / |union| of the set 
     amines: N1 = {100..103}  N2 = {100,101,104,105}  N3 = {200..203}
             T(N1,N2) = 1/3, T(N1,N3) = T(N2,N3) = 0
 A1 carries a count of 3 on bit 0 so that binarising the counts is exercised.
+The second block, morgan_centre, repeats the bits except for A2 and N2 (see centre_fingerprint), so
+that B8 and B2 genuinely disagree: T(A1,A2) and T(N1,N2) are 3/5 there and 1/3 on morgan.
 """
 
 import math
+import tracemalloc
 
 import numpy as np
 import pandas as pd
@@ -46,14 +49,27 @@ def fingerprint(key: str) -> np.ndarray:
     return counts
 
 
+def centre_fingerprint(key: str) -> np.ndarray:
+    """The rooted block of the same substrate, made to disagree with ``morgan`` on purpose.
+
+    A2 keeps three of A1's four bits here (T(A1,A2) = 3/5 on this block, 1/3 on morgan) and N2 keeps
+    three of N1's (T(N1,N2) = 3/5 here, 1/3 on morgan). Every other substrate is as in ``BITS``.
+    """
+    bits = {"A2": [0, 1, 2, 6], "N2": [100, 101, 102, 104]}.get(key, BITS[key])
+    counts = np.zeros(N_BITS, dtype=np.uint8)
+    counts[bits] = 1
+    return counts
+
+
 def substrates() -> pd.DataFrame:
-    """Stage F table of the six substrates (key_stereo, key_flat, morgan)."""
+    """Stage F table of the six substrates (key_stereo, key_flat, morgan, morgan_centre)."""
     keys = list(BITS)
     return pd.DataFrame(
         {
             "key_stereo": keys,
             "key_flat": [key.lower() for key in keys],
             "morgan": [fingerprint(key) for key in keys],
+            "morgan_centre": [centre_fingerprint(key) for key in keys],
         }
     )
 
@@ -172,7 +188,7 @@ def test_nearest_pair_uses_the_minimum_not_the_mean() -> None:
     """P = {(A1,N1)}. Scored (A1,N2) shares the acid exactly (1) and has an amine at T(N1,N2) = 1/3.
     Minimum: 1/3 = 0.333. The mean would give (1 + 1/3) / 2 = 0.667, about halfway."""
     scores = nearest_pair_scores(
-        paired(("A1", "N2")), positives(("A1", "N1")), substrates()
+        paired(("A1", "N2")), positives(("A1", "N1")), substrates(), "morgan"
     )
     assert scores[0] == pytest.approx(1 / 3)
 
@@ -182,7 +198,7 @@ def test_a_pair_identical_to_a_positive_scores_one() -> None:
     also shows the counts are binarised (a count-weighted Tanimoto of A1 with itself is still 1,
     but with A2 it would differ from 1/3)."""
     scores = nearest_pair_scores(
-        paired(("A1", "N1")), positives(("A1", "N1")), substrates()
+        paired(("A1", "N1")), positives(("A1", "N1")), substrates(), "morgan"
     )
     assert scores.dtype == np.float64
     assert scores[0] == pytest.approx(1.0)
@@ -192,7 +208,7 @@ def test_nearest_pair_binarises_the_counts() -> None:
     """Scored (A2,N1) against P = {(A1,N1)}: T(A2,A1) on the bits is 2/6 = 1/3 although A1 holds a
     count of 3 on bit 0 (a count Tanimoto would be 2/(3+1+...) = 2/8 = 0.25). Amine side is 1."""
     scores = nearest_pair_scores(
-        paired(("A2", "N1")), positives(("A1", "N1")), substrates()
+        paired(("A2", "N1")), positives(("A1", "N1")), substrates(), "morgan"
     )
     assert scores[0] == pytest.approx(1 / 3)
 
@@ -200,7 +216,10 @@ def test_nearest_pair_binarises_the_counts() -> None:
 def test_nearest_pair_takes_the_maximum_over_positive_pairs() -> None:
     """Scored (A1,N2). P1 = (A1,N1) gives min(1, 1/3) = 1/3; P2 = (A1,N2) gives 1. Maximum: 1."""
     scores = nearest_pair_scores(
-        paired(("A1", "N2")), positives(("A1", "N1"), ("A1", "N2")), substrates()
+        paired(("A1", "N2")),
+        positives(("A1", "N1"), ("A1", "N2")),
+        substrates(),
+        "morgan",
     )
     assert scores[0] == pytest.approx(1.0)
 
@@ -213,11 +232,11 @@ def test_nearest_pair_is_independent_of_the_chunk_size(
     frame = paired(*GRID)
     positive_rows = positives(("A1", "N1"), ("A2", "N2"))
     monkeypatch.setattr(baselines, "CHUNK", 5000)
-    reference = nearest_pair_scores(frame, positive_rows, substrates())
+    reference = nearest_pair_scores(frame, positive_rows, substrates(), "morgan")
     for chunk in (1, 2, 4):
         monkeypatch.setattr(baselines, "CHUNK", chunk)
         np.testing.assert_array_equal(
-            nearest_pair_scores(frame, positive_rows, substrates()), reference
+            nearest_pair_scores(frame, positive_rows, substrates(), "morgan"), reference
         )
 
 
@@ -232,8 +251,8 @@ def test_additive_cannot_see_the_pairing() -> None:
         additive_scores(frame, pairing_1, substrates()),
         additive_scores(frame, pairing_2, substrates()),
     )
-    one = nearest_pair_scores(paired(("A1", "N1")), pairing_1, substrates())
-    two = nearest_pair_scores(paired(("A1", "N1")), pairing_2, substrates())
+    one = nearest_pair_scores(paired(("A1", "N1")), pairing_1, substrates(), "morgan")
+    two = nearest_pair_scores(paired(("A1", "N1")), pairing_2, substrates(), "morgan")
     assert (one[0], two[0]) == (pytest.approx(1.0), pytest.approx(1 / 3))
 
 
@@ -315,7 +334,7 @@ def test_nearest_pair_with_no_positives_fails_loudly() -> None:
     the block is (n, 0), and numpy's max over it raises a bare zero-size reduction ValueError."""
     empty = positives(("A1", "N1")).iloc[:0]
     with pytest.raises(ValueError, match="positives"):
-        nearest_pair_scores(paired(("A1", "N1")), empty, substrates())
+        nearest_pair_scores(paired(("A1", "N1")), empty, substrates(), "morgan")
 
 
 def test_additive_with_no_positives_fails_loudly() -> None:
@@ -324,3 +343,65 @@ def test_additive_with_no_positives_fails_loudly() -> None:
     empty = positives(("A1", "N1")).iloc[:0]
     with pytest.raises(ValueError, match="positives"):
         additive_scores(paired(("A1", "N1")), empty, substrates())
+
+
+def test_b8_is_b2_on_the_centred_block() -> None:
+    """The fixture is built so the blocks disagree: scored (A1,N2) against P = {(A1,N1)} is
+    min(1, 1/3) = 1/3 on morgan (B2) and min(1, 3/5) = 3/5 on morgan_centre (B8). Equal scores
+    would prove nothing, so the test first states that they differ."""
+    frame, reference = paired(("A1", "N2")), positives(("A1", "N1"))
+    b2 = nearest_pair_scores(frame, reference, substrates(), "morgan")
+    b8 = nearest_pair_scores(frame, reference, substrates(), "morgan_centre")
+    assert b2[0] != pytest.approx(b8[0])
+    assert (b2[0], b8[0]) == (pytest.approx(1 / 3), pytest.approx(3 / 5))
+
+
+def test_b8_uses_the_same_similarity_as_b2() -> None:
+    """Scored (A2,N2) against P = {(A1,N1)}, hand-computed. morgan: T(A2,A1) = 2/6, T(N2,N1) = 2/6,
+    minimum 1/3. morgan_centre: A2 = {0,1,2,6} against A1 = {0,1,2,3} shares 3 of 5, N2 likewise,
+    minimum 3/5. Only the block changed; the minimum and the binarising did not."""
+    frame, reference = paired(("A2", "N2")), positives(("A1", "N1"))
+    morgan = nearest_pair_scores(frame, reference, substrates(), "morgan")
+    centre = nearest_pair_scores(frame, reference, substrates(), "morgan_centre")
+    assert morgan[0] == pytest.approx(1 / 3)
+    assert centre[0] == pytest.approx(3 / 5)
+
+
+def test_fingerprints_refuse_an_unknown_block() -> None:
+    """A block the feature table does not carry raises ValueError naming it, not pandas' KeyError."""
+    with pytest.raises(ValueError, match="morgan_ecfp"):
+        nearest_pair_scores(
+            paired(("A1", "N1")), positives(("A1", "N1")), substrates(), "morgan_ecfp"
+        )
+
+
+@pytest.mark.parametrize("block", ["morgan", "morgan_centre"])
+def test_nearest_pair_stays_chunked_on_either_block(block: str) -> None:
+    """3,000 scored pairs against 2,000 positive pairs: one unchunked CHUNK-free float32 array of
+    scored x positive would be 24 MB, so a peak under 12 MB shows the row loop still works block by
+    block (256 rows x 2,000 x 4 bytes = 2 MB per array) for whichever block is read. Fingerprints
+    are 64 bits wide here so that the table itself is small."""
+    generator = np.random.default_rng(0)
+    keys = [f"S{i}" for i in range(60)]
+    wide = {
+        name: [(generator.random(64) < 0.3).astype(np.uint8) for _ in keys]
+        for name in ("morgan", "morgan_centre")
+    }
+    table = pd.DataFrame({"key_stereo": keys, **wide})
+    scored = pd.DataFrame(
+        {
+            "key_a_stereo": generator.choice(keys[:30], 3000),
+            "key_b_stereo": generator.choice(keys[30:], 3000),
+        }
+    )
+    reference = pd.DataFrame(
+        {
+            "key_a_stereo": generator.choice(keys[:30], 2000),
+            "key_b_stereo": generator.choice(keys[30:], 2000),
+        }
+    )
+    tracemalloc.start()
+    nearest_pair_scores(scored, reference, table, block)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert peak < 12_000_000

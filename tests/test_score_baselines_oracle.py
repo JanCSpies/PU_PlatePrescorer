@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 
 from platepu.score import baselines
-from platepu.score.baselines import additive_scores, nearest_pair_scores
+from platepu.score.baselines import MORGAN, additive_scores, nearest_pair_scores
 
 N_BITS = 2048
 
@@ -123,7 +123,7 @@ def _all_pairs(n_acids: int, n_amines: int) -> pd.DataFrame:
 def _assert_b2_identical(
     paired: pd.DataFrame, positives: pd.DataFrame, substrates: pd.DataFrame
 ) -> np.ndarray:
-    actual = nearest_pair_scores(paired, positives, substrates)
+    actual = nearest_pair_scores(paired, positives, substrates, MORGAN)
     expected = b2_reference_2026_10_22(paired, positives, substrates)
     assert actual.dtype == np.float64
     assert np.array_equal(actual, expected)
@@ -200,7 +200,7 @@ def test_b2_substrates_with_no_bits_give_zero_not_nan() -> None:
     positive_rows = _pairs((0, 0), (3, 3), (1, 4), (4, 2))
     scores = _assert_b2_identical(_all_pairs(5, 5), positive_rows, substrates)
     assert not np.isnan(scores).any()
-    both_empty = nearest_pair_scores(_pairs((3, 3)), _pairs((4, 4)), substrates)
+    both_empty = nearest_pair_scores(_pairs((3, 3)), _pairs((4, 4)), substrates, MORGAN)
     assert both_empty[0] == 0.0
 
 
@@ -218,7 +218,7 @@ def test_b2_identical_fingerprints_give_duplicate_similarity_columns() -> None:
 def test_b2_returns_float64() -> None:
     generator = np.random.default_rng(8)
     substrates = _substrates(_random_bits(generator, 2), _random_bits(generator, 2))
-    scores = nearest_pair_scores(_all_pairs(2, 2), _pairs((0, 0)), substrates)
+    scores = nearest_pair_scores(_all_pairs(2, 2), _pairs((0, 0)), substrates, MORGAN)
     assert scores.dtype == np.float64
 
 
@@ -255,3 +255,48 @@ def test_b3_float64_accumulation_differs_from_a_float32_sum() -> None:
         ]
     actual = additive_scores(paired, positive_rows, substrates)
     assert not np.array_equal(actual, total32.astype(np.float64))
+
+
+def test_nearest_pair_scores_unchanged_after_the_refactor() -> None:
+    """B2 and B8 on six hand-made substrates, values hard-coded.
+
+    Taken from ``nearest_pair_scores`` on 2026-10-28, before ``features.blocks`` existed. Acids
+    a0 {0,1,2,3}, a1 {0,1,4,5}, a2 {10..13}; amines n0 {100..103}, n1 {100,101,104,105},
+    n2 {200..203}. On ``morgan`` T(a0,a1) = T(n0,n1) = 2/6; on ``morgan_centre`` a1 keeps three of
+    a0's bits {0,1,2,6} and n1 three of n0's {100,101,102,104}, so both are 3/5. The values are the
+    float32 Tanimoto widened to float64, which is what B2 returns (see ``_side_similarity``), so
+    ``array_equal`` and not ``allclose``: a move in the last digit is a change.
+    Grid order a0n0, a0n1, a0n2, a1n0, a1n1, a1n2, a2n0, a2n1, a2n2; positives a0n0, a1n1, a2n2.
+    """
+    substrates = _substrates(
+        [np.array([0, 1, 2, 3]), np.array([0, 1, 4, 5]), np.arange(10, 14)],
+        [np.arange(100, 104), np.array([100, 101, 104, 105]), np.arange(200, 204)],
+    )
+    centre_bits = {"a1": [0, 1, 2, 6], "n1": [100, 101, 102, 104]}
+    centre = []
+    for key, counts in zip(substrates["key_stereo"], substrates["morgan"], strict=True):
+        vector = np.zeros(N_BITS, dtype=np.uint8)
+        vector[centre_bits.get(key, np.flatnonzero(counts))] = 1
+        centre.append(vector)
+    substrates["morgan_centre"] = centre
+    third, three_fifths = 0.3333333432674408, 0.6000000238418579
+    expected = {
+        "morgan": [1.0, third, 0.0, third, 1.0, 0.0, 0.0, 0.0, 1.0],
+        "morgan_centre": [
+            1.0,
+            three_fifths,
+            0.0,
+            three_fifths,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ],
+    }
+    for block, values in expected.items():
+        actual = nearest_pair_scores(
+            _all_pairs(3, 3), _pairs((0, 0), (1, 1), (2, 2)), substrates, block
+        )
+        assert actual.dtype == np.float64
+        assert np.array_equal(actual, np.array(values)), block

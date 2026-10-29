@@ -1,8 +1,12 @@
-"""The baselines B0 to B7 of stage S1 (docs/design/modeling.md; ADR 006 item 5, ADR 007 item 5).
+"""The baselines B0 to B8 of stage S1 (docs/design/modeling.md; ADR 006 item 5, ADR 007 item 5).
 
 Every function takes the output of ``pair_features`` and returns one float per row, in row order.
-None of them fits a parameter: B2 and B3 only look up the positives. Higher is always better, and a
-score is comparable only inside one scored set, so the caller scores one set at a time.
+None of them fits a parameter: B2, B3 and B8 only look up the positives. Higher is always better,
+and a score is comparable only inside one scored set, so the caller scores one set at a time.
+
+B8 is B2 read from the centred fingerprint, so both come out of ``nearest_pair_scores`` with the
+block as an argument. The two bars that survive a change of reaction class are these, because B4 to
+B6 are hand-written amide chemistry (ADR 014 item 2).
 """
 
 import hashlib
@@ -14,12 +18,18 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from platepu.features.blocks import block_matrix
+
 # Scored pairs per block of the B2 reduction. Read at call time so a test can shrink it; the answer
 # does not depend on it. The cost is set by the number of positive *pairs*, which at the class width
 # is 28,158 (over 11,543 distinct acids and 9,959 amines, counted 2026-10-22). With the columns
 # selected first, one block holds three float32 arrays of CHUNK x 28,158, so 256 rows cost about
 # 86 MB against the 1.7 GB that 5,000 would, and nothing larger is built on the way.
 CHUNK = 256
+# The two fingerprint blocks stage F writes. ``morgan_centre`` is rooted at the reacting atom and is
+# not a subset of ``morgan`` (configs/features.yml).
+MORGAN = "morgan"
+MORGAN_CENTRE = "morgan_centre"
 
 
 @dataclass(frozen=True)
@@ -92,20 +102,29 @@ def popularity_scores(paired: pd.DataFrame, positives: pd.DataFrame) -> np.ndarr
 
 
 def nearest_pair_scores(
-    paired: pd.DataFrame, positives: pd.DataFrame, substrates: pd.DataFrame
+    paired: pd.DataFrame,
+    positives: pd.DataFrame,
+    substrates: pd.DataFrame,
+    block: str,
 ) -> np.ndarray:
-    """B2: how close the pair is to the nearest reported pair.
+    """B2 on ``block = "morgan"``, B8 on ``block = "morgan_centre"``: how close the pair is to the
+    nearest reported pair.
 
-    Tanimoto on the binarised Morgan counts, per side; the similarity of a scored pair to a positive
-    pair is the **minimum** of the two sides, and the score is the maximum over the positives. The
+    Tanimoto on the binarised counts, per side; the similarity of a scored pair to a positive pair
+    is the **minimum** of the two sides, and the score is the maximum over the positives. The
     minimum, not the mean: a pair that shares its acid with a reported pair but carries an unrelated
     amine is not an analogue of it.
 
+    B8 is this baseline rooted at the reacting atom, so it is this function with another argument
+    and not a second copy: one definition, one similarity, and the two differ only in what the
+    fingerprint looked at (ADR 013 item 5, ADR 014 item 2).
+
     Raises:
-        ValueError: ``positives`` is empty (see ``_require_positives``).
+        ValueError: ``positives`` is empty (see ``_require_positives``), or ``block`` is not a
+            column of ``substrates``.
     """
     _require_positives(positives, "B2")
-    index, bits = _fingerprints(substrates)
+    index, bits = _fingerprints(substrates, block)
     rows, by_positive = {}, {}
     for side, key in (("a", "key_a_stereo"), ("b", "key_b_stereo")):
         similarity, scored, positive = _side_similarity(
@@ -119,10 +138,11 @@ def nearest_pair_scores(
         rows[side] = paired[key].map(scored).to_numpy()
     scores = np.empty(len(paired), dtype=np.float64)
     for start in range(0, len(paired), CHUNK):
-        block = slice(start, start + CHUNK)
-        acid = by_positive["a"][rows["a"][block]]
-        amine = by_positive["b"][rows["b"][block]]
-        scores[block] = np.minimum(acid, amine).max(axis=1)
+        # Named for the rows it slices, not "block": that word now means the feature block.
+        chunk = slice(start, start + CHUNK)
+        acid = by_positive["a"][rows["a"][chunk]]
+        amine = by_positive["b"][rows["b"][chunk]]
+        scores[chunk] = np.minimum(acid, amine).max(axis=1)
     return scores
 
 
@@ -139,7 +159,8 @@ def additive_scores(
         ValueError: ``positives`` is empty (see ``_require_positives``).
     """
     _require_positives(positives, "B3")
-    index, bits = _fingerprints(substrates)
+    # B3 exists on the plain block only; there is no centred variant of it to choose between.
+    index, bits = _fingerprints(substrates, MORGAN)
     total = np.zeros(len(paired), dtype=np.float64)
     for key in ("key_a_stereo", "key_b_stereo"):
         similarity, scored, _ = _side_similarity(
@@ -209,11 +230,18 @@ def _entropy(text: str) -> int:
     return int.from_bytes(hashlib.blake2b(text.encode(), digest_size=8).digest(), "big")
 
 
-def _fingerprints(substrates: pd.DataFrame) -> tuple[dict[str, int], np.ndarray]:
-    """Row index of every key, and the binarised Morgan counts as a float matrix for the dot product."""
+def _fingerprints(
+    substrates: pd.DataFrame, block: str
+) -> tuple[dict[str, int], np.ndarray]:
+    """Row index of every key, and ``block``'s binarised counts as a float matrix for the dot product.
+
+    Raises:
+        ValueError: from ``block_matrix``, when the block is unknown or the table lacks its columns.
+    """
     index = {key: row for row, key in enumerate(substrates["key_stereo"])}
-    counts = np.stack([np.asarray(fingerprint) for fingerprint in substrates["morgan"]])
-    return index, (counts > 0).astype(np.float32)
+    # The conversion lives in one place (ADR 018); binarising is this caller's own choice, because
+    # Tanimoto is about which environments occur and not how often.
+    return index, (block_matrix(substrates, block) > 0).astype(np.float32)
 
 
 def _side_similarity(
