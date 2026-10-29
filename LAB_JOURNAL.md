@@ -5,6 +5,191 @@ interpretation → next. Every number can be regenerated with the commands in it
 
 ---
 
+## 2026-10-29 — Yield cut-off at 20 %, stages P, U and F rebuilt, B8 implemented, and an anchor ablation that found nothing
+
+Two days of work, one entry, because nothing was committed in between.
+
+**Context.** I decided that a reaction works above 20 % yield. `min_yield_pct` had been left null for exactly this. Every table downstream of P depended on the old P, so they all had to be rebuilt. Reading Chen et al. then raised a worry: a model may read our construction of U and not the chemistry. I wanted a control for that, and I wanted the reading rule fixed before I measured.
+
+**Done.**
+- Set the cut-off in `configs/classes/amide_coupling.yml`. A yield outside (0, 100] is rejected with its own reason (`yield_out_of_range`), before the cut-off is applied. Without that, 453 pairs would enter P on a report above 100 %. The worst reading was 56,524,596, almost certainly a mass in the percent field.
+- Added `reported.parquet`: every reported pair with its label. Stage U must subtract all of them, not only P.
+- Rebuilt stage P, stage U and stage F.
+- Implemented B8 as B2 on the centred block: one function with a block argument, not a second copy.
+- Measured how much information the descriptors carry, and tried to compress `morgan` two ways.
+- Wrote the anchor ablation: a second rule, `size_stratified_both_sides`, that replaces both sides of a pair from their own size deciles (`configs/models/unlabeled_both_sides_k10.yml`).
+- Wrote ADR 020 from a measurement made on the way (below).
+
+**Result.**
+
+Stage P. Command:
+
+    uv run python scripts/positives.py amide_coupling ~/University/Phd/Dataset/Datasets/derived --sources orderly --benchmark-labels ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/labels.parquet
+
+| | n |
+|---|---|
+| positive | 11,396 |
+| negative | 1,121 |
+| unlabeled | 15,641 |
+| total | 28,158 |
+| rejected, `yield_out_of_range` | 465 |
+| rejected, `below_min_yield` | 1,141 |
+
+| | before | after |
+|---|---|---|
+| Chemlex leakage, pairs | 1 | 0 |
+| Chemlex leakage, substrates | 567 | 215 |
+| HATU family | 1,177 | 627 |
+
+Stage U on the smaller P. Command:
+
+    uv run python scripts/unlabeled_literature.py amide_coupling ~/University/Phd/Dataset/Datasets/derived --config configs/models/unlabeled_literature_k10.yml
+
+| | value |
+|---|---|
+| pairs kept | 102,200 |
+| draws | 110,585 |
+| rejected | 3,375 |
+| gate, acid | 0.5049 |
+| gate, amine | 0.5095 |
+| single-partner substrates | 67 % to 72.2 % |
+| simulated null | 0.0718 to 0.0842 |
+
+Stage F, rebuilt because `in_positives` still described the old P. Command (the stage scripts take `.../Datasets/derived`; the Chemlex benchmark lives under `.../Datasets/derived_samples`):
+
+    uv run python scripts/features.py amide_coupling ~/University/Phd/Dataset/Datasets/derived \
+        --validation ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/HATU_DIPEA_DMF/validation.parquet
+
+| | before | after |
+|---|---|---|
+| substrates | 22,050 | 11,345 |
+| adversarial problem, acids, lit : lab | 11,203 : 189 | 5,570 : 249 |
+
+B-series after the rebuild. **These AUCs read the Chemlex validation labels. Unlike everything else in this entry, they are not label-free.** Two steps. First the score table:
+
+    uv run python scripts/score_baselines.py amide_coupling HATU_DIPEA_DMF ~/University/Phd/Dataset/Datasets/derived \
+        --validation ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/HATU_DIPEA_DMF/validation.parquet
+
+then `uv run python scripts/counts/count_baseline_aucs.py ~/University/Phd/Dataset/Datasets ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/HATU_DIPEA_DMF/validation.parquet` (it refuses any file not named `validation.parquet`).
+
+| baseline | AUC | moved? |
+|---|---|---|
+| B4 | 0.7426 | no |
+| B6 | 0.8221 | no |
+| B7 | 0.5982 | no |
+| B8 (new, at class width) | 0.7221 | not comparable |
+| B8 (new, at family width) | 0.7247 | not comparable |
+
+B8 had been quoted in accepted records at 0.7115 as the bar S2 must clear. `grep` found it in no source file.
+
+I first wrote 0.7221 down as 0.7226. I caught it by re-running the published command before committing, which is the second transcription error of the day and the argument for publishing the command next to every number.
+
+ADR 012 has a transcription error. It gives 0.730 and 0.776 for the nine descriptors from `count_adversarial.py`. Command: `uv run python scripts/counts/count_adversarial.py ~/University/Phd/Dataset/Datasets` (the Datasets root, without `derived`; the count scripts join it themselves).
+
+On the **pre-cut-off** feature table, the one ADR 012 itself used:
+
+| | ADR 012 | the command |
+|---|---|---|
+| nine descriptors, amines | 0.776 | 0.735 |
+| `descriptors + size` (the row below) | — | 0.776 |
+
+Acids and both `morgan` values matched exactly there, so on that table the slip is one row in ADR 012 and nothing more.
+
+Then the 20 % cut-off rebuilt stage F to 11,345 substrates, and **none** of ADR 012's provenance figures reproduces any more:
+
+| block | ADR 012 (pre-cut-off) | the command today |
+|---|---|---|
+| `morgan`, acid · amine | 0.864 · 0.870 | 0.859 · 0.879 |
+| nine descriptors, acid · amine | 0.730 · 0.776 | 0.721 · 0.700 |
+
+The amine descriptor figure moves most, 0.776 down to 0.700, and that one matters: ADR 012's argument is that the hand-written descriptors carry *more* provenance on amines than the rooted fingerprint does. On the rebuilt table they carry **less** — 0.700 against `morgan_centre`'s 0.733 — so the direction of that claim reverses. I am not editing ADR 012. Per ADR 018's consequences this goes into a further ADR once the provenance axis is published properly, and `score/axes.py` is the first half of that work.
+
+I checked that the table is the cause and not my own refactor: `git show HEAD:scripts/counts/count_adversarial.py`, the committed version, run on the same table prints the same figures as the rewired script on every row.
+
+The descriptor question. Commands: `uv run python scripts/counts/count_bit_frequency.py ~/University/Phd/Dataset/Datasets`, `uv run python scripts/counts/count_fold_width.py ~/University/Phd/Dataset/Datasets`, `uv run python scripts/counts/count_centre_distance.py ~/University/Phd/Dataset/Datasets`.
+
+I first ran these three before the stage F rebuild, on 22,050 substrates, and re-ran them
+on the rebuilt table before committing. All three shapes survived; every number moved.
+
+| block | distinct fingerprints among 11,345 substrates | bits per substrate |
+|---|---|---|
+| `morgan_centre` | 615 | 3.0 |
+| `morgan` | 10,943 | 34.2 |
+
+| compression of the full fingerprint | distinct |
+|---|---|
+| frequency floor, any useful threshold | 10,943 |
+| re-fold, width 32 | 10,697 |
+| re-fold, width 8 | 62 |
+
+| bonds from the reacting atom, 0 to 6 | distinct |
+|---|---|
+| | 615 · 2,613 · 5,229 · 7,474 · 8,862 · 10,263 · 10,943 |
+
+The measurement behind ADR 020. Balanced pool, 3,000 positives against 3,000 unlabeled pairs, 5-fold. Command: `uv run python scripts/counts/count_block_ladder.py ~/University/Phd/Dataset/Datasets`.
+
+| feature set | anchored U | unanchored control |
+|---|---|---|
+| frequency, both sides | 0.5640 | 0.5547 |
+| size alone | 0.5011 | 0.5329 |
+| the nine descriptors | 0.5843 | 0.6080 |
+| `morgan_centre`, both sides | 0.4896 | 0.4915 |
+| `morgan`, both sides | 0.4780 | 0.4616 |
+
+Pipeline control. Command: `uv run python scripts/counts/count_pipeline_control.py ~/University/Phd/Dataset/Datasets`.
+
+| literature against lab, `morgan` | this path | published script | shuffled folds |
+|---|---|---|---|
+| acids | 0.859 | 0.859 | 0.858 |
+| amines | 0.879 | 0.879 | 0.882 |
+
+Binarising the counts changes nothing (0.4896 stays 0.4896).
+
+The anchor ablation. Commands:
+
+    uv run python scripts/unlabeled_literature.py amide_coupling ~/University/Phd/Dataset/Datasets/derived --config configs/models/unlabeled_both_sides_k10.yml
+    uv run python scripts/counts/count_anchor_ablation.py ~/University/Phd/Dataset/Datasets
+
+The nearest-neighbour method lives in the tracked module `src/platepu/score/pair_knn.py`, and the script that produced these numbers is `scripts/counts/count_anchor_ablation.py`.
+
+| | anchored U | control |
+|---|---|---|
+| size correlation, pair sides | −0.363 | −0.358 |
+| size correlation in P | −0.377 | |
+| size correlation, the sampler ADR 015 rejected | | +0.003 |
+| nearest-neighbour AUC, K = 5, `morgan_centre` | 0.5668 | 0.5596 |
+| nearest-neighbour AUC, K = 5, `morgan` | 0.6867 | 0.6843 |
+
+K = 1 loses everywhere, so Chen's two-cluster signature is absent.
+
+**Interpretation.**
+- The cut-off made P smaller and cleaner. Leakage to Chemlex went to 0 pairs. It also made the popularity shortcut worse (single-partner 67 % to 72.2 %), and the null rose with it. That is why the gate is a multiple of a null and not an absolute number.
+- B4 to B7 did not move. That is the control that says the rebuild behaved.
+- Resolution cannot trade bias against information: a frequency floor does nothing and re-folding is a cliff, not a slope. Only what the descriptor looks at can. Locality does it.
+- Fingerprints at 0.5 on the balanced pool are correct, not broken. The model cannot represent the interaction, and the pairing is all that separates P from U. ADR 020 records this and the rule it gives.
+- The anchor contributes nothing these probes can find. The reading rule was fixed before any measurement: every readout a comparison, never a level, and a difference below 0.05 not a difference. By that rule all differences above are noise. This does not prove the sampler is clean. It says these probes did not find a leak.
+
+The part worth keeping, and it is not a number. Five times these two days I built an instrument that measured itself and not the data:
+- a boosted tree too short for 4,096 columns;
+- a linear model that cannot represent the interaction the task is made of;
+- before those, a probe blind by construction;
+- a criterion no correct sampler could meet;
+- a classifier on one monotone feature.
+
+Three times I was saved only because the value was impossible: a richer fingerprint cannot score below the poorer one contained in it, and a classifier cannot fall below chance on honestly split data. Twice I was saved by a control written in advance. Those two are the results I trust.
+
+Each time the correct rule already existed somewhere in the project and I reached for a function that did not carry it. It is the same defect I removed in the morning, when four copies of "fingerprint column to matrix" became one. It came back twice before evening.
+
+I also made two wrong diagnoses in a row for the same symptom, unshuffled folds and then raw counts. Both were guesses. What ended it was a control with a known answer, not a sixth fix.
+
+**Next.**
+- Publish the seven count scripts cited above under ADR 011 (decided at the end of the day; ADR 021 records it). Every command in this entry now names a tracked path, which closes the gap I had already found once in this file.
+- Commit this, split by topic.
+- The single Chemlex check the ablation plan still owes.
+- Stage S2, with interaction capability as an elimination criterion (ADR 020). The bar to clear is the nearest-neighbour 0.6843 on `morgan`.
+
+---
+
 ## 2026-10-28 — Stage U built: the unlabeled space for amide coupling, after five decision records written before it existed
 
 **Context.** The first commit landed on 2026-10-23. Since then I planned the whole of stage S2 and locked it in five decision records, written before any of it existed. Once a model has been fitted, a choice about how to judge it is no longer a choice.
