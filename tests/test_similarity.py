@@ -97,6 +97,108 @@ def test_known_block_without_its_column_is_refused_differently() -> None:
         fingerprints(table, "morgan_centre")
 
 
+# ---- fingerprints: refusals (written 2026-10-30 before the guards, which then followed) -------
+#
+# The refusals name up to five offending keys and give the total, as positives/unlabeled.py and
+# features/substrate.py do. Naming matters because a null key (the "KeyError: nan" that
+# positives/unlabeled.py records) must be told apart from a key truly missing from the table.
+# An earlier version of these tests asserted counts only; that was reversed the same day.
+
+
+def test_duplicated_key_is_refused_with_counts() -> None:
+    """Keys 'dup_a' (twice) and 'dup_b' (three times): 2 duplicated keys over 5 rows."""
+    table = pd.concat(
+        [
+            substrate_table({"dup_a": [1, 0, 0, 0, 0, 0]}),
+            substrate_table({"dup_a": [0, 1, 0, 0, 0, 0]}),
+            substrate_table({"dup_b": [0, 0, 1, 0, 0, 0]}),
+            substrate_table({"dup_b": [0, 0, 0, 1, 0, 0]}),
+            substrate_table({"dup_b": [0, 0, 0, 0, 1, 0]}),
+            substrate_table({"unique": [0, 0, 0, 0, 0, 1]}),
+        ],
+        ignore_index=True,
+    )
+    with pytest.raises(
+        ValueError, match=r"duplicated key_stereo.*\(2 on 5 rows\)"
+    ) as refusal:
+        fingerprints(table, BLOCK)
+    assert "dup_a" in str(refusal.value)
+    assert "dup_b" in str(refusal.value)
+    assert "unique" not in str(refusal.value)
+
+
+def test_distinct_keys_are_accepted_and_indexed_as_before() -> None:
+    """Control for the refusals above: one row per key gives the index and matrix it always gave."""
+    rows = {"acid_a": [1, 0, 2, 0, 0, 0], "acid_b": [0, 3, 0, 0, 0, 1]}
+    index, bits = fingerprints(substrate_table(rows), BLOCK)
+    assert index == {"acid_a": 0, "acid_b": 1}
+    assert bits.tolist() == [
+        [1.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def test_same_key_with_different_fingerprints_is_refused_not_resolved() -> None:
+    """Today the second row silently wins: 'twin' maps to row 1 and row 0's fingerprint is lost.
+
+    The two rows share no bit, so a similarity read off the wrong one is 0.0 where the right
+    one is 1.0 against {0}. The guard must refuse the frame instead of choosing a row.
+    """
+    table = pd.concat(
+        [
+            substrate_table({"twin": [1, 0, 0, 0, 0, 0]}),
+            substrate_table({"twin": [0, 0, 0, 0, 0, 1]}),
+        ],
+        ignore_index=True,
+    )
+    with pytest.raises(
+        ValueError, match=r"duplicated key_stereo.*\(1 on 2 rows\)"
+    ) as refusal:
+        fingerprints(table, BLOCK)
+    assert "twin" in str(refusal.value)
+
+
+def test_same_key_with_identical_fingerprints_is_refused_too() -> None:
+    """Identical duplicates are harmless today, and refusing them is still the choice (CLAUDE.md §8).
+
+    Telling harmless duplicates from harmful ones is itself a branch, for a case stage F does not
+    produce. Without this test someone adds "identical rows, keep either" and nothing fails.
+    """
+    table = pd.concat(
+        [
+            substrate_table({"clone": [1, 1, 0, 0, 0, 0]}),
+            substrate_table({"clone": [1, 1, 0, 0, 0, 0]}),
+        ],
+        ignore_index=True,
+    )
+    with pytest.raises(ValueError, match=r"\(1 on 2 rows\)") as refusal:
+        fingerprints(table, BLOCK)
+    assert "clone" in str(refusal.value)
+
+
+def test_two_null_keys_count_as_one_duplicated_value() -> None:
+    """Two rows with a null key_stereo: reported as 1 value on 2 rows, never '0 duplicated'.
+
+    A count by nunique() drops nulls and would say 0; the null must be shown.
+    """
+    table = pd.DataFrame(
+        {
+            "key_stereo": ["a", np.nan, np.nan],
+            BLOCK: [np.array([1, 0, 0, 0, 0, 0], dtype=np.uint8)] * 3,
+        }
+    )
+    with pytest.raises(ValueError, match=r"\(1 on 2 rows\)") as refusal:
+        fingerprints(table, BLOCK)
+    assert "nan" in str(refusal.value)
+
+
+def test_frame_without_key_stereo_is_refused_by_name() -> None:
+    """Same wording as block_matrix's refusal of a missing block column (features/blocks.py)."""
+    table = substrate_table({"acid": [1, 0, 0, 0, 0, 0]}).drop(columns="key_stereo")
+    with pytest.raises(ValueError, match=r"lacks column\(s\) \['key_stereo'\]"):
+        fingerprints(table, BLOCK)
+
+
 # ---- side_similarity -------------------------------------------------------------------------
 
 
@@ -221,3 +323,69 @@ def test_full_width_float32_shared_and_union_are_exact_integers() -> None:
     expected = shared_int.astype(np.float32) / union_int.astype(np.float32)
     assert (similarity == expected).all()
     assert similarity[scored["s0"], positive["s0"]] == 1.0
+
+
+# ---- side_similarity: refusals of keys the substrate table does not hold ----------------------
+#
+# Today these end in a bare KeyError(key) that names neither the side nor how many keys are
+# missing, the same shape of failure as "KeyError: nan" in tests/test_unlabeled_literature.py.
+
+
+def test_scored_key_missing_from_the_table_is_refused_with_counts() -> None:
+    """Scored 'ghost_s', 'a', 'ghost_s' -> 2 distinct keys, 1 missing."""
+    rows = {"a": [1, 0, 0, 0, 0, 0], "p": [1, 1, 0, 0, 0, 0]}
+    with pytest.raises(
+        ValueError, match=r"scored keys missing.*\(1 of 2 distinct\)"
+    ) as refusal:
+        similarity_of(rows, ["ghost_s", "a", "ghost_s"], ["p"])
+    assert "ghost_s" in str(refusal.value)
+
+
+def test_positive_key_missing_from_the_table_is_refused_with_counts() -> None:
+    """Positive 'p', 'ghost_1', 'ghost_2' -> 3 distinct keys, 2 missing; the scored side is whole."""
+    rows = {"a": [1, 0, 0, 0, 0, 0], "p": [1, 1, 0, 0, 0, 0]}
+    with pytest.raises(
+        ValueError, match=r"positive keys missing.*\(2 of 3 distinct\)"
+    ) as refusal:
+        similarity_of(rows, ["a"], ["p", "ghost_1", "ghost_2"])
+    assert "ghost_1" in str(refusal.value)
+    assert "ghost_2" in str(refusal.value)
+    assert "scored" not in str(refusal.value)
+
+
+def test_both_sides_short_reports_the_scored_side() -> None:
+    """Pinned: the scored side is reported, because side_similarity looks it up first.
+
+    Reporting the first failure found is the simplest deterministic rule; the caller fixes that
+    side and the next run reports the other.
+    """
+    rows = {"a": [1, 0, 0, 0, 0, 0]}
+    with pytest.raises(
+        ValueError, match=r"scored keys missing.*\(1 of 1 distinct\)"
+    ) as refusal:
+        similarity_of(rows, ["ghost_s"], ["ghost_p"])
+    assert "positive" not in str(refusal.value)
+    assert "ghost_p" not in str(refusal.value)
+
+
+def test_null_scored_key_is_refused_and_shown() -> None:
+    """A null key_stereo in the pairs is the reachable case (positives/unlabeled.py: KeyError: nan).
+
+    The message must show it, so the reader looks at the pairs and not at the feature table. Naming
+    it also makes the refusal order a float nan against string keys, which sorted() cannot do.
+    """
+    rows = {"a": [1, 0, 0, 0, 0, 0], "p": [1, 1, 0, 0, 0, 0]}
+    with pytest.raises(
+        ValueError, match=r"scored keys missing.*\(1 of 2 distinct\)"
+    ) as refusal:
+        similarity_of(rows, ["a", np.nan], ["p"])  # type: ignore[list-item]
+    assert "nan" in str(refusal.value)
+
+
+def test_every_key_present_is_accepted_and_scored_as_before() -> None:
+    """Control for the refusals above: a = {0,1}, p = {1,2}: shared 1, union 3 -> 1/3."""
+    rows = {"a": [1, 1, 0, 0, 0, 0], "p": [0, 1, 1, 0, 0, 0]}
+    similarity, scored, positive = similarity_of(rows, ["a"], ["p"])
+    assert scored == {"a": 0}
+    assert positive == {"p": 0}
+    assert similarity[0, 0] == np.float32(1 / 3)
