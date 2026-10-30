@@ -5,6 +5,158 @@ interpretation → next. Every number can be regenerated with the commands in it
 
 ---
 
+## 2026-10-30 — Do the 1,121 literature negatives belong in training? No: they are an instrument (the day's second entry)
+
+**Context.** This is the second entry of today. Reading that the 20 % cut-off had produced 1,121 pairs we know do not work, I asked how PAYN handles this, and whether it would be better to say "above 20 % is positive" and keep no negatives. Nothing was measured today for this entry. I read the PAYN note and checked the code. That is all of "Done".
+
+**Done.**
+- Read `docs/literature/notes/boser-2026-payn.md`. It is an agent summary I have not yet checked against the PDF line by line.
+- Read `build_positives` and `build_reported` in `src/platepu/positives/build.py`. Nothing was run.
+- Wrote ADR 024.
+
+**Result.** These are readings, not measurements.
+
+Counts, from the stage P run of 2026-10-29:
+
+    uv run python scripts/positives.py amide_coupling ~/University/Phd/Dataset/Datasets/derived --sources orderly --benchmark-labels ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/labels.parquet
+
+| | n |
+|---|---|
+| positive | 11,396 |
+| negative | 1,121 |
+| total | 28,158 |
+
+1,121 of 28,158 is 4 % (division of the two table values).
+
+What the code does: `build_positives` writes P alone. The three labels live in `reported.parquet`. The docstring of `build_reported` names two purposes: stage U subtracts every reported pair, and the spy step reads the known negatives. So "no negatives in training" is already the design.
+
+What PAYN does (note, page references as the note gives them):
+
+| | PAYN |
+|---|---|
+| data | HTE, every well measured, true negatives known (p. 15069) |
+| negatives | discarded on purpose, then rebuilt from U by spies (p. 15068–15069; SI p. S11) |
+| spy rate / tolerance | 0.2 / 0.05 (SI p. S25) |
+| RN yield | synthetic 0.0 % (SI p. S14) |
+| class prior | not estimated (p. 15068–15069) |
+| P:U | 1:1, excess discarded (SI pp. S11, S16) |
+| "U = negative" baseline | lost to positives-only (SI p. S14) |
+| RN false negatives, Stevens | about 50 % (SI p. S24) |
+
+The one thing PAYN has that I do not: ground truth over U, so it can measure RN precision (p. 15071). My U is constructed.
+
+**Interpretation.**
+- The simplification I proposed would cost exactly one thing. Stage U would still subtract the 1,121, because it subtracts every reported pair whatever its label. What would go is role 2: using them to check the spy threshold. They are the only real failures I have, and they stand where PAYN's HTE truth stands.
+- Reasons against training on them are in ADR 024 item 3, all from `uv run python scratch/count_2x2_control_levels.py`: 68 % and 63 % of reports missing temperature and time, and the spread of conditions. That last one I first wrote as `[n]`, because I had a figure in hand but no written source for it — and that placeholder is what saved it. Looking for the source, in that run's own saved output `scratch/private/control_levels_out.txt` line 116, I found that the number I remembered, 2,164, counts distinct keys among all **28,633 kept reports**, while the population my argument is about — the **12,517 observed pairs** — spans **1,531**. Right field, right file, wrong population. The distribution is the better argument anyway: one key holds 3,488 of those pairs and 849 keys hold a single pair, so the reported failures sit in a long tail of one-off conditions rather than beside the positives under a shared protocol.
+- That same output confirms the `yield_kind` claim a second way, which I was not looking for: on every level of control, demanding that the four cells share `yield_kind` removes no design that demanding they share `time` had not already removed — 833 and 833, 522 and 522, 489 and 489. That is what a constant field does, and it is a cleaner demonstration than my grep for the literal string.
+- Nothing is measured about checking the threshold or the model on these negatives. They are intended uses. The negatives are biased, so any precision I get from them is biased in a direction I cannot name.
+- A mistake in my own notes: `docs/design/modeling.md` line 372 says the P:U question "goes to ADR 008". ADR 008 does not contain it. I noted this in ADR 024 and did not edit either file.
+
+**Next.**
+- Decide spy rate and tolerance, P:U 1:1 or full, the prior, and PAYN as a baseline. All four are open.
+- Fix the dangling pointer: `docs/design/modeling.md` line 372 sends the P:U question to ADR 008, which never received it. Its line 372 also still gives ~1:242, which is the inventory U; the literature draw is 1:9.7 at line 635. Both want a pass, in their own commit.
+- Count how many of the 1,121 would be lost if the negative rule were less strict.
+
+---
+
+## 2026-10-30 — The information axis is cut as a Setting-4 split, and RLScore stays a reference
+
+**Context.** ADR 022 item 4 left the estimator of the information axis open. Yesterday I measured four things that say the axis as ADR 018 item 3 wrote it cannot be built as written: the acid-grouped folds test Setting 3, blocking reopens the frequency shortcut, and the probe I built to size the bias failed. The three scripts are in `scratch/` and not published, so the numbers are written out here and in ADR 023. Today I fixed the split, the raking, the estimator and the controls before any selection number exists. I also tried the authors' implementation, RLScore, to see whether it could be the estimator.
+
+**Done.**
+- Wrote ADR 023 and the subsection "The information axis — the Setting-4 protocol" in `docs/design/modeling.md`.
+- Fixed the split at 3 × 3 before any selection number exists.
+- Installed RLScore in an isolated throwaway environment outside the project, and ran `CGKronRLS` on a synthetic task.
+- Corrected one sentence in `modeling.md`: `score` imports `features.blocks` and `io`, not nothing from `platepu`.
+
+**Result.**
+
+What the acid-grouped folds test.
+
+    uv run python scratch/count_setting4_split.py
+
+| | |
+|---|---|
+| test pairs with an amine seen in training, P and U, 5 folds, 5 CV seeds | 100 % |
+| test pairs with both sides unseen | 0 |
+| amine seen in a training positive, P / U | 68 % / 93 % |
+| distinct amines / pairs | 4,658 / 113,596 |
+
+What the 3 × 3 Setting-4 split leaves (20 partition seeds).
+
+| | |
+|---|---|
+| pairs discarded | 44 % |
+| training block | about 51,100 pairs |
+| test cell | about 12,400 pairs |
+| smallest test cell | 1,025 P, 9,776 U, 1,821 acids, 1,517 amines |
+| 4 × 4: discarded / test cell | 37.5 % / about 7,000 pairs |
+| 2 × 2: discarded | 50 % |
+
+The frequency shortcut inside a block, and the raking.
+
+    uv run python scratch/count_shortcut_probe.py
+
+| | |
+|---|---|
+| rank-AUC of P above U by in-block frequency | 0.538–0.570 |
+| by full-P frequency (stage gate: 0.5049 acid, 0.5095 amine) | 0.495–0.516 |
+| marginal TVD before raking | 0.17–0.24 |
+| marginal TVD after raking (200 passes) | ≤ 0.0009 |
+| frequency rank-AUC after raking | 0.4999–0.5000 |
+| block U pairs given weight 0 | 23–29 % |
+| U effective sample size / nominal | about 0.68 |
+
+    uv run python scratch/count_shortcut_probe_extra.py
+
+| | |
+|---|---|
+| identity-only oracle, acid side, pair-level folds | 0.189 |
+| shuffled labels, same folds | 0.498 |
+| `d = all`, fitted in sample, reweighted arm (10,943 distinct fingerprints, 11,345 substrates) | 0.5001 |
+
+The RLScore investigation. The install commands and the version output were not saved; I have the observations and not the logs, which is a gap.
+
+| | |
+|---|---|
+| licence | MIT (Pahikkala and Airola, 2008–2016) |
+| PyPI 0.8.1 on Python 3.13 | does not build, `longintrepr.h` |
+| GitHub master on Python 3.13 | installs |
+| `CGKronRLS` on SciPy 1.18.1 (project: SciPy 1.18.1, scikit-learn 1.9.1, numpy 2.5.3) | fails at runtime, `_xp` not set on `PairwiseKernelOperator` |
+| `CGKronRLS` on SciPy 1.14.1 | runs |
+
+A synthetic pure-interaction task: label = sign of one feature on each side multiplied, so no marginal signal. 3,000 pairs, 1,200 observed, 600 train, 600 test, seed 0. The Kronecker kernel there is the product of two linear per-side kernels.
+
+I first ran this out of the session scratchpad, which would have left the two numbers citable but not reproducible — the mistake this whole day has been about. So the script now lives at `scratch/probe_kronecker_reference.py`, its docstring carries every step of building the reference environment, and it runs in either stack, computing whichever half that stack allows:
+
+    $PROBE/.venv/bin/python scratch/probe_kronecker_reference.py   # the Kronecker half
+    uv run python scratch/probe_kronecker_reference.py             # the additive half
+
+| | AUC |
+|---|---|
+| `CGKronRLS`, Kronecker kernel | 0.9575 |
+| logistic regression on the concatenated sides | 0.5658 |
+
+The additive figure needed checking twice. In the reference environment scikit-learn 1.9.1 sits beside SciPy 1.14.1, which are not tuned to each other, and that half threw divide-by-zero and overflow warnings — so I re-read it in our own stack, where it is clean. Both give 0.5658, so the warnings did not move it. I would not have known that without looking.
+
+**Interpretation.**
+- The estimand changed, and that is the main result of the day. Under the 3 × 3 rule about 44 % of P is never scored, so "every positive is scored out of fold" in ADR 018 item 3 is false. The axis measures the Setting-4 subpopulation of P. I first wrote this down as a price. It is not a price. It changes what the number means, and the paper has to say it. Whether it is a sentence or a problem depends on a count I do not have: scored against discarded positives on literature frequency and heavy-atom count.
+- The 0.5001 at `d = all` shows only that the one-sided marginal shortcut is gone. It does not show that U is clean, and the pairing is what the axis is meant to read. I also have nothing that shows the raking does not remove real pair signal while it removes marginal signal; zeroing 23–29 % of U is not neutral on the pair distribution. So the planted-interaction control is a gate and not a diagnostic.
+- I rake the test cell as well as the training block. Otherwise the test cell keeps the 0.538–0.570 and the figure is partly a frequency reading. I have not measured the raking on a test cell. The 23–29 % and the 0.68 are from the training blocks.
+- `λ` is fixed across the seven candidates, for the reason I gave against the Gaussian `γ`: otherwise there are seven instruments.
+- Binarised Tanimoto, to keep one similarity in the project. I add the product beside the minimum in the model-free reading and do not touch the minimum, so ADR 020's 0.6843 stays.
+- I corrected a claim of my own. I had said the boosted tree "already reported `morgan` below `morgan_centre` at 120 iterations". ADR 020 does not say that. Its 0.4780 against 0.4896 is the linear model, and the tree is there only as a 0.58–0.61 range. What ADR 020 does carry is that the tree underfits 4,096 sparse columns at 120 iterations, and the rejection rests on that alone. The per-candidate tree ordering has to be printed before I publish the clause.
+- RLScore is not a dependency. Its licence is fine. The reason is the install and the SciPy contract. It needs GitHub master on Python 3.13 and then fails on our SciPy, and the fix would be a downgrade of a core library or a shim on a library I would then maintain. I write our own conjugate-gradient fit (about one module and one test module) and check it against RLScore in the isolated environment. The 0.9575 against 0.5658 reproduces ADR 020's claim in miniature. It is a synthetic control and not a result about our data.
+- Two claims I use are not verified: that a product of PSD kernels is PSD and that Tanimoto on binary vectors is a kernel. If the Gram matrix has a negative eigenvalue the estimator clause fails.
+
+**Next.**
+- Counts first (CLAUDE.md §8), listed in ADR 023 Consequences: per-side counts in blocks and cells; the raked block and cell over 5 partition seeds, which also fix the TVD tolerance; the share of P never scored and how it differs from the scored; the tree's ordering of the seven candidates from `scripts/counts/count_block_ladder.py`; the minimum eigenvalue of the Gram matrices; one iteration's cost at n ≈ 51,100; the base rate per test cell.
+- Put the synthetic probe into `scratch/` so the 0.9575 and 0.5658 can be regenerated.
+- Open and not decided: where the code lives under `score/`, whether the protocol writes a table through `io`, whether the winner's stage F column is added before or after the Chemlex agreement check, whether the three scratch scripts are published (each hard-codes a path, ADR 021 item 2).
+- The `Superseded by` lines of ADR 018 and ADR 019 still need a pointer to 023.
+
+---
+
 ## 2026-10-29 — Can the interaction concordance index be the information axis? I counted: no
 
 The day's third entry. The first two are below it and I do not edit them.
