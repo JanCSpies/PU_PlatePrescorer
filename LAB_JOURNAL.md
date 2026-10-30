@@ -5,6 +5,82 @@ interpretation → next. Every number can be regenerated with the commands in it
 
 ---
 
+## 2026-10-30 — The literature gave no value for `spy_fraction`; it said the spy step is a heuristic (the day's fourth entry)
+
+**Context.** This is the fourth entry of today. Before choosing `spy_fraction` I asked for the literature on
+PU learning without SCAR to be read. Two papers were read in full by an agent and written up as notes, which I
+have not checked against the PDFs: `docs/literature/notes/bekker-2019-beyond-scar-propensity.md` and
+`docs/literature/notes/kumar-2024-pulsnar-class-proportion-without-scar.md`. ADR 013 item 3 chose the spy
+technique over estimating the class prior. ADR 019 established that SCAR fails here but named `e(x)`, SAR and
+SNAR with no source.
+
+**Done.**
+- Read the two notes against ADR 013, 019 and 024.
+- Checked each repository figure I cite against its record (ADR 008, 018, 020, 024; `docs/design/modeling.md`; the stage U entry).
+- Wrote ADR 026. It supersedes nothing. I did not edit ADR 013, 019 or 024.
+
+**Result.** No value for `spy_fraction`. Two findings.
+
+Both principled routes out of SCAR need P and U to be separable. My sampler removes that on purpose.
+
+| | figure | source |
+|---|---|---|
+| rank-AUC of literature frequency, acids | 0.5049 | stage U gate |
+| rank-AUC of literature frequency, amines | 0.5095 | stage U gate |
+| U pairs kept | 102,200 | stage U |
+| literature-against-lab adversarial AUC, `morgan`, acids · amines | 0.859 · 0.879 | `scripts/counts/count_adversarial.py` |
+
+Commands:
+
+    uv run python scripts/unlabeled_literature.py amide_coupling ~/University/Phd/Dataset/Datasets/derived --config configs/models/unlabeled_literature_k10.yml
+    uv run python scripts/counts/count_adversarial.py <datasets root>
+
+(The second takes its path argument as in ADR 020; I did not rerun either today. The values are those in the stage U entry and in ADR 018 and 020.)
+
+- PULSNAR (Kumar and Lambert 2024) estimates α, the positive fraction among the unlabeled only, from `α_max = min(D_u_i / D_p_i)`. It needs the two densities distinguishable. If they nearly coincide α goes toward 1, and I could not tell that from "my matching worked".
+- Bekker, Robberechts and Davis (2019) fit a propensity model by EM and say it "will work best if the classes are separable" (p. 9).
+- Their U is not mine. They draw one sample and labelling acts on it (p. 2). I built 102,200 pairs around the published ones, so my U rows had probability zero of being labelled. Their weighted estimator is unbiased for the empirical risk on whatever set I hold (p. 5). That risk is under my sampler's marginal, not the plate's and not nature's. An EM on my tables would report my sampling design as publication propensity.
+
+The size of the SCAR failure and the counterweight, both from Bekker et al., ROC-AUC, simulated bias (no command, authors' figures, via the note, Fig. 1b, p. 12):
+
+| | SCAR-KM2 | SAR-EM | naive (U as negative) |
+|---|---|---|---|
+| diabetes | 0.500 | 0.659 | 0.632 |
+| 20 Newsgroups | 0.603 | 0.891 | 0.859 |
+| breast cancer | 0.971 | 0.983 | 0.992 |
+| mushroom | 0.924 | 1.000 | 1.000 |
+
+Naive beat SCAR-KM2 on 6 of 8 datasets. On four of the eight the whole question is worth under 0.05 AUC. The large wins are in two datasets.
+
+SCAR-based α estimators usually underestimate for α of 15 % and above (Kumar and Lambert, § SNAR data, via the note). My α may be high:
+
+| | figure | source |
+|---|---|---|
+| validation positive rate | 29.14 % of 2,615 | ADR 008; `docs/design/modeling.md` line 18 |
+| PAYN unlabeled sets | 58–77 % positive | PAYN note, SI pp. S4–S6 |
+
+No command for the last two rows: the first is from ADR 008's record, the second is the authors' figure via an agent note.
+
+**Interpretation.**
+- The spy step stays, and I now call it a heuristic for choosing reliable negatives, not an estimator. ADR 013 item 3 already said π was not honestly estimable. What is new is that the two methods built for the non-SCAR case both need the separability I removed.
+- The failure Bekker et al. describe (p. 11) is a SCAR method choosing the wrong subspace to hit the right ratio. A spy threshold chooses how much of the space is reliably negative, so it could cut the wrong part while looking calibrated. Their data is simulated and not chemistry. I have not shown this happens here.
+- The same paper says correcting the bias is often not worth much. The naive control of ADR 016 item 2 therefore stays, and is better motivated than when I wrote it.
+- The 1,121 negatives of ADR 024 change standing. They were prudence. They are now the only check I have on the reliable-negative set.
+- `spy_fraction` has to be measured. PAYN tuned 0.2 and 0.05 at P:U = 1:1 and mine is about 1:9.7. The research found nothing on how the threshold responds to that ratio. That is a statement about the search, which is not recorded in the repository.
+- No code from either paper. Neither states a code licence in the paper. Reading a licence is not agreeing to a dependency.
+
+**A correction from the same session.** The first reading of the recommender-systems literature on negative sampling had it that my sampler must be unusually rich in false negatives "by that literature's own logic". That does not follow, and the source was checked only after the claim was made. Hard negative sampling selects by **model score** — it takes what the model ranks highest, which is exactly why those items are often true positives; arXiv:2602.18759 names this the "False Negative Problem" and cites PinSage for it. My sampler matches on a **covariate**, the heavy-atom decile. Matching on size does not make a pair more likely to work; it makes it harder to tell apart **by size**. Those are different things. The closer analogy is the property-matched decoys of DUD-E, which the Chen note already covers (`docs/literature/notes/chen-2019-hidden-bias-dude.md`) — though that note's own wording is "closer to their control than to their failure", so reading it as "not hard-negative mining" is my inference and not Chen's sentence.
+
+What that literature does give is the vocabulary and one clean decomposition: `y = o · r`, click equals exposure times relevance (Entropy 2025, 28(1):41, doi 10.3390/e28010041, CC BY 4.0, read through PMC12839574). For us that reads *published = someone tried and chose to report × it worked*. Both of those papers were read in this session — arXiv:2602.18759 as HTML, the Entropy one through PMC, where the fetch covered the first 100,000 of about 131,000 characters — but **neither has a literature note**, so they are session reading and not part of the record yet. Two further pointers were **not** read at all and are ids from the search alone: arXiv:2401.06452 (AutoML for PU learning, which treats the spy rate and tolerance as searched hyperparameters) and arXiv:1808.02180 (He et al., propensity falling with the probabilistic gap).
+
+**Next.**
+- Measure `spy_fraction` and the tolerance, and fix both before any Chemlex read, as ADR 023 fixed its split. Needs a count first; the sweep is not designed.
+- Read the licence of both codebases at source. I will say separately whether I agree to either as a dependency.
+- Open, not decided: α on the inventory grid (284,600 lab pairs, not marginal-matched; PULSNAR's support assumption is the trap); He et al., arXiv:1808.02180, for the propensity shape; whether SCAR can be tested (arXiv:2404.00145, pointed to in ADR 019). Nobody has read the first or the third.
+- Check the two notes against the PDFs.
+
+---
+
 ## 2026-10-30 — "44 % of P is never scored" was my error: every positive is scored once (the day's third entry)
 
 **Context.** This is the third entry of today. ADR 023 says, as its headline, that about 44 % of P is never scored under the Setting-4 split, that "every positive is scored out of fold" becomes false, and that PAUC measures a subpopulation. I wrote that. When I explained the record I made it the headline, which went further than the drafting note did. ADR 023 also demanded eight counts before any code. I ran them today.
