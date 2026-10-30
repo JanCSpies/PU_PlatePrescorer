@@ -3,6 +3,7 @@
 - **Status:** Accepted, 2026-10-28, **before any selection number was measured**
 - **Supersedes:** 012 in part (item 1, the reactivity axis measured on Chemlex) and 014 in part (item 2,
   `morgan_centre` as primary regardless of the selection) · **Superseded by:** 019 in part (items 3 and 4)
+  · 023 in part (item 3, the fold rule)
 
 ADRs 008, 012, 014 and 017 are Accepted and are not rewritten (CLAUDE.md §8). This record replaces how
 the block is chosen. It leaves intact ADR 008 item 1 (no hand-written chemistry in the features), ADR

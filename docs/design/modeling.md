@@ -391,8 +391,8 @@ and a fit-then-predict, and ADR 006 item 5 runs them weeks apart. They write the
 stage E reads one layout. **S1 is built first** (Luka, 2026-10-21); the S2 inputs go to ADR 008.
 
 **Code.** `src/platepu/score/pairs.py` (pair rows and the feature matrix) and `score/baselines.py`;
-`scripts/score_baselines.py`. `score` imports nothing from `platepu` at all; the script reads
-the positives, library and benchmark tables and hands DataFrames in. Nothing imports `score`.
+`scripts/score_baselines.py`. `score` imports only `features.blocks`; the script imports `io` and
+reads the positives, library and benchmark tables, and hands DataFrames in. Nothing imports `score`.
 
 **Inputs.** The feature table `private/features/<class>/substrates.parquet`; the positives at both
 widths (`family = "<family>"` and `"all"`, ADR 006 item 1); U, `private/unlabeled/<class>/<family>.parquet`;
@@ -732,6 +732,143 @@ interval are stage E. The evaluation is ADR 008 item 6, a pre-registration, and 
 hand; a planted separable case where the reliable negatives must be exactly the planted ones; a matrix
 that must contain no descriptor column, and an input carrying one, which must raise; realised spy
 recall equal to 0.95 under the written tie rule; two runs identical.
+
+### The information axis — the Setting-4 protocol (agreed 2026-10-30, ADR 023)
+
+ADR 018 item 3 asked for the ROC-AUC of ranking P above U, cross-fitted over 5 folds grouped on the acid
+flat key, and ADR 019 named it PAUC and added a bootstrap interval. The fold rule does not survive
+measurement: under it **100 % of test pairs have an amine that appears in training**, at all 5 folds and
+all 5 CV seeds, for P and for U, and **no** test pair has both sides unseen. 4,658 amines carry 113,596
+pairs, so the rule cannot produce an unseen amine at any seed. That is Setting 3 of Viljanen, Airola and
+Pahikkala, "new acid, known amine". Our deployment is their Setting 4, a new class with new substrates
+on both sides. ADR 023 replaces the rule. This section is what gets built.
+
+**This is not a pipeline stage.** It fits models to choose a column; it writes no stage table, and no
+stage reads it. It is a protocol, run once, whose output is a decision recorded in an ADR and in the
+journal.
+
+**Inputs.**
+
+| table | columns |
+|---|---|
+| `<root>/positives/amide_coupling/positives.parquet`, `family = "all"` | `key_a_flat`, `key_b_flat`, `key_a_stereo`, `key_b_stereo`, `n_reports`, `std_version`, `licence` |
+| `<root>/unlabeled/amide_coupling/unlabeled_literature_k10.parquet` | the same four keys, `n_draws`, `std_version`, `licence` |
+| `<root>/private/features/amide_coupling/substrates.parquet` | `key_stereo`, `role`, `smiles`, `std_version`, restricted to keys that occur in P or U, so no library row and no `internal` licence enters the protocol |
+
+The seven candidate blocks are computed from `smiles` by the same code as
+`scripts/counts/count_centre_distance.py`, so stage F is untouched until a `d` wins (ADR 018 item 6).
+No benchmark table is opened: not `labels.parquet`, not `validation.parquet`, and never any
+`test.parquet`. A mixed `std_version` across the three inputs raises.
+
+**The split (ADR 023 item 1).** The distinct acid flat keys of P ∪ U go into 3 near-equal parts and the
+distinct amine flat keys into 3, independently, under partition seed `20261030`. 3 × 3 is fixed, not
+2 × 2 or 4 × 4. For each of the 9 cells `(i, j)` the **training block** is every pair whose acid is
+outside part `i` and whose amine is outside part `j`; the **test cell** is every pair whose acid is in
+part `i` and whose amine is in part `j`; every mixed pair is **discarded**. Counted at 3 × 3: 44 %
+discarded, training block about 51,100 pairs, test cell about 12,400; over 20 partition seeds the
+smallest cell held 1,025 P and 9,776 U pairs over 1,821 acids and 1,517 amines. Flat keys, because the
+fingerprints are chirality-blind. A hyperparameter, if any survives ADR 023 item 3, is chosen on the
+training block split again 75/25 **by the same rule**, and the inner split never sees the test cell.
+
+**The estimand changes.** Because of the discard, about 44 % of P is never scored. PAUC here is measured
+on the Setting-4 subpopulation of P and not on P, and ADR 018 item 3's "every positive is scored out of
+fold" is no longer true. The paper states this. The report carries the share of P scored and compares
+the scored with the discarded positives on literature frequency and heavy-atom count.
+
+**U is reweighted (ADR 023 item 2), in the training block and in each test cell.** U's marginals are
+matched to the **whole** of P (ADR 013 item 1, ADR 015), so an in-block P is a subsample and the match
+degrades. Measured: ranking P above U by **in-block** frequency reads 0.538–0.570, where by **full-P**
+frequency it reads 0.495–0.516, which is stage U's own gate (0.5049 acid, 0.5095 amine). 0.04–0.07 above
+chance is three times the gate's 0.02 tolerance, in every cell and at every seed, so the shortcut the
+sampler closed reopens inside a block. Raking U's `n_draws` (iterative proportional fitting, 200 passes,
+target = each flat key's P count in the same rows, scaled to U's mass there) takes the marginal
+total-variation distance from 0.17–0.24 to **≤ 0.0009** and the frequency rank-AUC to **0.4999–0.5000**
+(measured on training blocks; the test cells are not yet counted). Both sets are raked: if only the block
+were, the test cell would keep the mismatch and the figure would be partly a frequency reading. PAUC is
+a weighted AUC on the raked weights, and the residual TVD is reported for both. The price is counted and
+reported, never hidden: **23–29 %** of block U pairs get weight 0, and U's effective sample size falls
+to about **0.68**. In sample at `d = all`, where 10,943 distinct fingerprints over 11,345 substrates give
+near-perfect memorisation capacity, the reweighted arm reads **0.5001**. That shows the one-sided
+marginal shortcut is gone. It does not show U is clean, and nothing yet shows the raking leaves the
+real pair signal alone. That is why control 3 below is a gate.
+
+The weights live in the protocol, not in stage U's table. A block weight is a property of a split and
+depends on the partition seed; writing it into `<root>/unlabeled/` would make a stage table depend on a
+fold seed and hand stage S2 a column it must not use.
+
+**The estimator (ADR 023 item 3).** The Kronecker product pairwise kernel with a normalised, binarised
+per-side Tanimoto base kernel, in weighted kernel ridge regression, P at 1 and U at 0, weights
+`n_draws × rake weight`, solved by conjugate gradient with the generalised vec trick. Our pair set is not
+a complete matrix (113,596 observed of 6,138 × 5,015 possible), so the closed form does not apply. The
+implementation is our own, about one module and one test module. RLScore (MIT) is a reference only: the
+fit is checked against it in an isolated environment on SciPy 1.14.1, and it is never a dependency,
+because it installs on Python 3.13 only from GitHub master and then fails on SciPy 1.18.1. The estimator
+here is an instrument comparing seven descriptors, so its sensitivity must not vary with what it
+measures, and the ladder spans 3.0 to 34.2 bits and 615 to 10,943 distinct fingerprints. A boosted tree
+underfits 4,096 sparse columns at 120 iterations (ADR 020), so its reading depends on a candidate's
+sparsity as much as on its information. Poly2D adds the per-side second-order blocks the raking just
+nulled. A Gaussian pairwise kernel is the same Kronecker form with a bandwidth that would need rescaling
+per candidate. Tanimoto is a ratio and reads the same way along the ladder; normalised per side, the
+Kronecker kernel has unit diagonal and no scale parameter. `λ` and the iteration budget are fixed across
+all seven candidates, chosen once on the inner split and recorded before any PAUC is read; the
+per-candidate inner-split values are a reported diagnostic. **Two claims are verified before the axis is
+read, not asserted:** that a product of PSD kernels is PSD, and that Tanimoto on our vectors is PSD, by
+the minimum eigenvalue of our own per-side and pair Gram matrices.
+
+**The readings per candidate `d`.** PAUC per cell, averaged over the 9 cells, as the primary number;
+IPM beside it (ADR 019 item 5); the model-free reading beside both (ADR 018 item 3), under the same split
+and the same weights. The model-free reading has two forms: the existing **minimum** of the two sides'
+Tanimoto (`score/pair_knn.py`, unchanged, so ADR 020's bar of 0.6843 does not move) and a new **product**
+beside it, added the way B8 was added beside B2. A disagreement between the readings is reported as a
+finding and not resolved by convenience. The interval is Owen's pigeonhole bootstrap, 5 repeats, 500
+resamples, seed 20261028, resampling the acid and amine flat keys **of the test cell** (cells share no
+substrates by construction) and bracketing the mean over cells. The eligibility and tie rules of ADR 018
+item 4 and ADR 019 item 4 apply unchanged, parsimony by fewest distinct fingerprints as the final
+tie-break.
+
+**Controls, fixed before any selection number exists (ADR 023 item 4).** Run on the same cells through
+the same code path; the axis is void if any fails.
+
+1. Labels shuffled with their weights inside the test cell: **0.50 ± 0.02**.
+2. The identity-only oracle, per-flat-key `P / (P + U)` from the training block, no fingerprint, scored
+   on the test cell: **0.50 ± 0.02**. Under pair-level folds this same oracle read **0.189** on the acid
+   side against 0.498 for shuffled labels, because a pair-fold removes a held-out pair's own contribution
+   from its molecule's counts, so a held-out P looks less P-like. A Setting-4 split gives that artefact no
+   channel, since no test-cell molecule is in the training block. That is a deduction, which this control
+   measures anyway.
+3. A planted cross-side interaction on the real fingerprints, two bits actually set at the candidate `d`:
+   must read well above 0.5 at every candidate, threshold and bits fixed with the counts beforehand. It
+   separates a real 0.5 from a dead instrument, and it is the check that the raking did not destroy pair
+   signal.
+4. P's amine column permuted inside the training block (stage U's shuffled-P probe, moved here): must
+   fall relative to the real reading, or the candidate is not being read on the pairing.
+
+Controls 1 to 4 gate the **instrument**, not the data, so ADR 017 is untouched: it governs probes that
+judge our U, and these judge our measuring device. A first synthetic known-answer control exists (a pure
+interaction with no marginal signal: `CGKronRLS` 0.9575, logistic regression on the concatenated sides
+0.5658), but its script is not yet in the repository.
+
+**Report keys,** per candidate and per cell: `pauc`, `pauc_ci_low`, `pauc_ci_high`, `ipm`,
+`pauc_model_free_min`, `pauc_model_free_product`, `n_p_scored`, `n_u_scored`, `share_p_discarded`,
+`u_pairs_zero_weight_share`, `u_effective_sample_fraction`, `marginal_tv_acid_block`,
+`marginal_tv_amine_block`, `marginal_tv_acid_cell`, `marginal_tv_amine_cell`,
+`frequency_rank_auc_before`, `frequency_rank_auc_after`, `lambda_inner_best`, `control_shuffled_labels`,
+`control_identity_oracle`, `control_planted_interaction`, `control_shuffled_pairing`, `n_acids`,
+`n_amines`, `partition_seed`, `std_version`, `config_sha256`, plus the package versions and the git
+commit. The seed sensitivity (partition seeds `20261030 + 1 … + 4`) is reported, never selected on.
+
+**Verification.** Tests first, on hand-written open pairs: a hand-made 6 × 6 pair set where the nine
+Setting-4 cells and the discarded pairs can be written out by hand, and the split must reproduce them
+exactly; a case where one side's parts are empty, which must raise; a hand-computed raking on a 2 × 2
+marginal, converged in one pass; a Gram matrix on three hand-written fingerprints whose Tanimoto values
+are computed by hand; our conjugate-gradient fit against a naive dense kernel on a small hand-made case
+(and against RLScore in the isolated environment); the planted chessboard, which the estimator must
+separate; the identity-only oracle on a block where no molecule crosses, which must read 0.5; and two
+runs giving identical numbers.
+
+Not decided here, and not built before it is: where the code lives under `score/`, whether the protocol
+writes a table through `io`, and whether the winner's stage F column is added before or after the
+Chemlex agreement check of ADR 018 item 5. The counts that come first are listed in ADR 023, Consequences.
 
 
 ## Sources
