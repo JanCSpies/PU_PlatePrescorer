@@ -1,7 +1,11 @@
 # 023 — The information axis is measured under a Setting-4 split, on a reweighted U, with a Kronecker–Tanimoto kernel
 
 - **Status:** Accepted, 2026-10-30, **before any selection number exists**
-- **Supersedes:** 018 in part (item 3, the fold rule only) · **Answers:** 022 item 4 (the estimator) · **Superseded by:** —
+- **Supersedes:** 018 in part (item 3, the fold rule only) · **Answers:** 022 item 4 (the estimator) ·
+  **Superseded by:** 025 in part (Decision item 1, the estimand sentence; Context 2, the bootstrap-unit
+  figures; Context 4, the three raking figures; Decision item 2, the tolerance; Decision item 3, the
+  boosted-tree sentence and the two verification items; the Consequences bullet on the subpopulation;
+  "Numbers needed first", number 6 reclassified)
 
 ADRs 018, 019, 020 and 022 are Accepted and are not rewritten (CLAUDE.md §8). This record replaces one
 sentence of ADR 018 item 3, the fold rule, and supplies the instrument ADR 022 item 4 left open.
