@@ -5,6 +5,92 @@ interpretation → next. Every number can be regenerated with the commands in it
 
 ---
 
+## 2026-10-30 — "44 % of P is never scored" was my error: every positive is scored once (the day's third entry)
+
+**Context.** This is the third entry of today. ADR 023 says, as its headline, that about 44 % of P is never scored under the Setting-4 split, that "every positive is scored out of fold" becomes false, and that PAUC measures a subpopulation. I wrote that. When I explained the record I made it the headline, which went further than the drafting note did. ADR 023 also demanded eight counts before any code. I ran them today.
+
+**Done.**
+- Counted the scored and never-scored share of P at 3 × 3, at five partition seeds (20261030–20261034, nine cells each) and at 4 × 4. Then checked the zero with an independent fifteen-line computation.
+- Compared scored against discarded P per cell, against a random-pair-subset null.
+- Raked the test cells and measured what is left (ESS, zeroed rows, TVD, floor, key counts).
+- Per-side sizes, base rate per cell, distinct fingerprints per candidate.
+- The boosted tree at four budgets; the PSD checks in float64.
+- Wrote ADR 025. I did not edit ADR 023 or `docs/design/modeling.md`.
+
+**Result.** Commands:
+
+    uv run python scratch/count_setting4_adr023.py
+    uv run python scratch/count_setting4_adr023_extra.py
+    uv run python scratch/count_tree_budget.py <seed> <stem>      # seeds 20261029-20261031 literature U, 20261029 both-sides control
+    uv run python scratch/count_psd_kernels.py ~/University/Phd/Dataset/Datasets
+
+Outputs are under `scratch/private/`.
+
+The estimand (first two scripts):
+
+| | measured |
+|---|---|
+| positives scored exactly once | 11,396 of 11,396 |
+| never scored, 5 seeds and 4 × 4 | 0 |
+| pairs discarded per cell | 0.4444 (= 4/9), range 0.4366 to 0.4593 |
+
+The split is clean. Scored against discarded P, per cell:
+
+| | median | range |
+|---|---|---|
+| CLES | 0.49–0.503 | 0.44–0.575 |
+| KS | 0.04–0.07 | max 0.13 |
+| null CLES (1/9 against 4/9 of P) | | 0.478–0.519 |
+| null KS median | 0.02 | |
+
+The raking is the real selection effect. 3.2 % of cell P pairs have no non-zero-weight U partner on a role (1,864 acid-side, 1,732 amine-side, of about 58,980). They are singletons and bigger: mean heavy atoms 19.6 against 18.4 (acid), 17.7 against 13.4 (amine).
+
+Three figures of ADR 023 Context 4 were wrong, all optimistic (min / median / max over 45 sets):
+
+| | ADR 023 | block | raked cell |
+|---|---|---|---|
+| U ESS | about 0.68 | 0.511 / 0.577 / 0.636 | 0.176 / 0.218 / 0.338 |
+| U rows zeroed | 23–29 % | 21.2 / 25.7 / 30.5 % | 49.4 / 57.3 / 63.6 % |
+| residual TVD | ≤ 0.0009 | ≤ 0.0011 | 0.011–0.063 acid, 0.013–0.051 amine |
+
+The 0.68 had P in the numerator. The cell TVD has a floor, the share of P with no non-zero-weight U. Excess over the floor: at most 0.0074 (acid), 0 (amine). 2,000 raking passes instead of 200 change nothing to four decimals.
+
+Bootstrap units after raking: cells 711 / 816 / 962 acids and 594 / 683 / 750 amines; blocks 2,637 / 2,843 / 2,999 and 2,159 / 2,287 / 2,448. ADR 023 cited 1,821 and 1,517, which are pre-raking.
+
+Base rate per cell, P / (P + Σ raked U weight): 0.0882 / 0.0934 / 0.0970. On the ESS reading, 0.315 / 0.370 / 0.429.
+
+Fingerprints per candidate inside the block (median): 438, 1,866, 3,573, 4,928, 5,740, 6,517, 6,879 for d = 0, 1, 2, 3, 4, 6, all. Strictly increasing in all 90 sets. No change to ADR 018 item 4.
+
+Boosted tree (`count_tree_budget.py`): `morgan` is below `morgan_centre` at 120 and at 200 iterations in all four runs (0.008–0.017 at 120), mixed at 500, ahead at 1,500 in all four (0.005–0.026). `make_model` uses 200. The 120-iteration gaps are of the order of the fold SD (0.005–0.023). No paired fold differences were computed. Logistic regression on the same pool: 0.4780 and 0.4896.
+
+PSD (`count_psd_kernels.py`, float64):
+
+| | minimum eigenvalue |
+|---|---|
+| per-side Tanimoto, full sets, 4 cases | −6.4e-12 to −3.2e-15 (all at the floor) |
+| Kronecker product, 12 samples | −3e-13 to +2.6e-2 |
+| `min(k_A, k_B)`, d=0, n=1,000 | −0.21 to −0.28 |
+| `min(k_A, k_B)`, d=all, n=4,000 | −7.83 to −7.97 (−2.5 % of λmax, 260–270 negatives) |
+
+Known-answer controls passed (identity +1.000; `[[1,2],[2,1]]` −1.000; random 500×500 −16.98). Acid Gram rank at d=0 is about 258 (5,731 zero eigenvalues of 5,989); at d=all about 5,957.
+
+**Interpretation.**
+- The error was about a procedure and not a number. I counted that 44 % of pairs are discarded and did not ask what it is a fraction of. In ordinary *k*-fold nothing is discarded. Here each fold discards the mixed pairs for that fold, but the nine cells partition P, so every positive is tested once. What shrinks is the training set per fold, 4/9 instead of 8/9. The estimand does not change. The sentence for the paper is: each positive is scored once, by a model trained without its acid and without its amine.
+- I caught it because ADR 023 asked for the count (its number 3). A claim about a procedure needs checking exactly as hard as a measured number does. I did not apply that to my own headline when I wrote it.
+- The other three misses have a common cause: I carried a training-block measurement to the test cell. They are different objects. The cell is smaller, so the raking zeroes more of U and a floor appears that the block does not show.
+- Because the cell TVD has a floor, a raw tolerance would measure singletons and not the raking. Luka's decision: block 0.002; cell, report the floor and set 0.01 on the excess over it (observed maximum 0.0074).
+- The tree sentence changes from "underfits" to "its ordering depends on its budget". The 200 iterations in `make_model` sit in the inverting range, so the argument against the tree as instrument now rests on a printed number. It is still not paired and still not converged.
+- A negative eigenvalue on a sample proves non-PSD. No negatives on a sample proves nothing. So the Kronecker form stands on the theorem and `min` is refuted by counterexample. The minimum stays K-NN-only.
+- A trap: `score/baselines._side_similarity` is float32, whose rounding would show up as a negative eigenvalue. The next PSD check must build float64 Gram matrices.
+
+**Next.**
+- Add ADR 025 to the `Superseded by` field of ADR 023 (me, by hand).
+- Put the corrected figures into the Setting-4 subsection of `docs/design/modeling.md`. Outstanding.
+- Implement the Kronecker–Tanimoto kernel ridge fit; time one vec-trick product there, on the sizes in ADR 025 Context 6.
+- ADR 023 number 9 (our fit against RLScore and a dense kernel, as a script) goes with the implementation.
+
+---
+
 ## 2026-10-30 — Do the 1,121 literature negatives belong in training? No: they are an instrument (the day's second entry)
 
 **Context.** This is the second entry of today. Reading that the 20 % cut-off had produced 1,121 pairs we know do not work, I asked how PAYN handles this, and whether it would be better to say "above 20 % is positive" and keep no negatives. Nothing was measured today for this entry. I read the PAYN note and checked the code. That is all of "Done".
