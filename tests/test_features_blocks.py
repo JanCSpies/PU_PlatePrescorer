@@ -1,7 +1,8 @@
 """Tests for platepu.features.blocks, written before the module on 2026-10-28.
 
 The module is the one place where a feature block of the stage F table becomes a dense matrix. It
-replaces the copies of the idiom in ``score.baselines._fingerprints``, ``count_adversarial``,
+replaces the copies of the idiom in ``score.similarity.fingerprints`` (which was
+``score.baselines._fingerprints`` until 2026-10-30), ``count_adversarial``,
 ``count_bit_frequency`` and ``count_fold_width``, and two sets of descriptors that shared one name.
 ``scripts/features.py`` ``morgan_summary`` is the one surviving copy: it summarises a block for the
 stage F report rather than feeding a model, and its numbers are in a committed report.

@@ -264,7 +264,7 @@ def test_nearest_pair_scores_unchanged_after_the_refactor() -> None:
     a0 {0,1,2,3}, a1 {0,1,4,5}, a2 {10..13}; amines n0 {100..103}, n1 {100,101,104,105},
     n2 {200..203}. On ``morgan`` T(a0,a1) = T(n0,n1) = 2/6; on ``morgan_centre`` a1 keeps three of
     a0's bits {0,1,2,6} and n1 three of n0's {100,101,102,104}, so both are 3/5. The values are the
-    float32 Tanimoto widened to float64, which is what B2 returns (see ``_side_similarity``), so
+    float32 Tanimoto widened to float64, which is what B2 returns (see ``similarity.side_similarity``), so
     ``array_equal`` and not ``allclose``: a move in the last digit is a change.
     Grid order a0n0, a0n1, a0n2, a1n0, a1n1, a1n2, a2n0, a2n1, a2n2; positives a0n0, a1n1, a2n2.
     """

@@ -6,7 +6,8 @@ descriptors, or size on its own. The same four lines were written out in ``score
 different dtype, and ADR 018 is about to measure a family of candidate blocks -- which would have
 added a fifth copy.
 
-Rewired onto this module: ``score.baselines._fingerprints``, ``count_adversarial``,
+Rewired onto this module: ``score.similarity.fingerprints`` (which was
+``score.baselines._fingerprints`` until 2026-10-30), ``count_adversarial``,
 ``count_bit_frequency`` and ``count_fold_width``. **Not** rewired: ``features.morgan_summary``,
 which summarises a block for the stage F report rather than feeding a model, and whose numbers are
 part of a committed report -- it is the one surviving copy of the idiom.

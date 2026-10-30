@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from platepu.features.blocks import block_matrix
+from platepu.score.similarity import fingerprints, side_similarity
 
 # Scored pairs per block of the B2 reduction. Read at call time so a test can shrink it; the answer
 # does not depend on it. The cost is set by the number of positive *pairs*, which at the class width
@@ -124,10 +124,10 @@ def nearest_pair_scores(
             column of ``substrates``.
     """
     _require_positives(positives, "B2")
-    index, bits = _fingerprints(substrates, block)
+    index, bits = fingerprints(substrates, block)
     rows, by_positive = {}, {}
     for side, key in (("a", "key_a_stereo"), ("b", "key_b_stereo")):
-        similarity, scored, positive = _side_similarity(
+        similarity, scored, positive = side_similarity(
             paired[key], positives[key], index, bits
         )
         # Columns first, rows second. Selecting the positive columns on the distinct-substrate
@@ -160,10 +160,10 @@ def additive_scores(
     """
     _require_positives(positives, "B3")
     # B3 exists on the plain block only; there is no centred variant of it to choose between.
-    index, bits = _fingerprints(substrates, MORGAN)
+    index, bits = fingerprints(substrates, MORGAN)
     total = np.zeros(len(paired), dtype=np.float64)
     for key in ("key_a_stereo", "key_b_stereo"):
-        similarity, scored, _ = _side_similarity(
+        similarity, scored, _ = side_similarity(
             paired[key], positives[key], index, bits
         )
         total += similarity.max(axis=1)[paired[key].map(scored).to_numpy()]
@@ -228,45 +228,3 @@ def _require_positives(positives: pd.DataFrame, model: str) -> None:
 def _entropy(text: str) -> int:
     """A stable 64-bit seed from a string; ``hash()`` changes between runs."""
     return int.from_bytes(hashlib.blake2b(text.encode(), digest_size=8).digest(), "big")
-
-
-def _fingerprints(
-    substrates: pd.DataFrame, block: str
-) -> tuple[dict[str, int], np.ndarray]:
-    """Row index of every key, and ``block``'s binarised counts as a float matrix for the dot product.
-
-    Raises:
-        ValueError: from ``block_matrix``, when the block is unknown or the table lacks its columns.
-    """
-    index = {key: row for row, key in enumerate(substrates["key_stereo"])}
-    # The conversion lives in one place (ADR 018); binarising is this caller's own choice, because
-    # Tanimoto is about which environments occur and not how often.
-    return index, (block_matrix(substrates, block) > 0).astype(np.float32)
-
-
-def _side_similarity(
-    scored: pd.Series, positive: pd.Series, index: dict[str, int], bits: np.ndarray
-) -> tuple[np.ndarray, dict[str, int], dict[str, int]]:
-    """Tanimoto between the distinct scored and the distinct positive substrates of one side.
-
-    Only the distinct substrates are compared: the lab holds 529 acids and 538 amines against about
-    11,000 and 10,000 in the positives, so the matrix stays small and the pair reduction is left to
-    the caller.
-
-    The result is **float32**, and deliberately not widened. Every step above is exact in float32:
-    the bits are 0 or 1 and the inner dimension is 2,048, so each dot product is an integer well
-    below 2^24, and ``union`` is an integer too. The single division is the only rounding in the
-    path. B2 then applies ``minimum`` and ``max``, which select rather than compute, so its answer
-    is unchanged; B3 adds, so it must accumulate into a float64 array, and it does.
-    """
-    scored_keys, positive_keys = pd.unique(scored), pd.unique(positive)
-    left = bits[[index[key] for key in scored_keys]]
-    right = bits[[index[key] for key in positive_keys]]
-    shared = left @ right.T
-    union = left.sum(1)[:, None] + right.sum(1)[None, :] - shared
-    similarity = np.divide(shared, union, out=np.zeros_like(shared), where=union > 0)
-    return (
-        similarity,
-        {key: row for row, key in enumerate(scored_keys)},
-        {key: column for column, key in enumerate(positive_keys)},
-    )

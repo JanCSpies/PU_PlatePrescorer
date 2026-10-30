@@ -20,9 +20,10 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 
-# The one similarity in the project (CLAUDE.md §5). They are private to `baselines`, and this probe
-# is their second consumer; reaching for the names here keeps one implementation rather than two.
-from platepu.score.baselines import _fingerprints, _side_similarity
+# The one similarity in the project (CLAUDE.md §5). It lived privately inside `baselines` until
+# 2026-10-30, and this probe reached past the underscore to get at it; it is now public in its own
+# module, which is what §5 asks for once a third caller needs it.
+from platepu.score.similarity import fingerprints, side_similarity
 
 SIDES = (("a", "key_a_stereo"), ("b", "key_b_stereo"))
 
@@ -35,11 +36,11 @@ def pair_similarity(
     The minimum, not the mean: a pair sharing its acid with another but carrying an unrelated amine
     is not its analogue. The diagonal is left at 1.0 — the caller drops it by position.
     """
-    index, bits = _fingerprints(substrates, block)
+    index, bits = fingerprints(substrates, block)
     sides = []
     for _, key in SIDES:
         keys = labelled[key]
-        similarity, rows, columns = _side_similarity(keys, keys, index, bits)
+        similarity, rows, columns = side_similarity(keys, keys, index, bits)
         sides.append(
             similarity[keys.map(rows).to_numpy()][:, keys.map(columns).to_numpy()]
         )

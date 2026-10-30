@@ -390,7 +390,9 @@ pair-assembly function, because one stage would need a branch between a pure fun
 and a fit-then-predict, and ADR 006 item 5 runs them weeks apart. They write the same columns, so
 stage E reads one layout. **S1 is built first** (Luka, 2026-10-21); the S2 inputs go to ADR 008.
 
-**Code.** `src/platepu/score/pairs.py` (pair rows and the feature matrix) and `score/baselines.py`;
+**Code.** `src/platepu/score/pairs.py` (pair rows and the feature matrix), `score/similarity.py`
+(the stage's one per-side substrate similarity, public since 2026-10-30 because B2/B3/B8, the pair
+K-NN probe and ADR 023's base kernel are three callers) and `score/baselines.py`;
 `scripts/score_baselines.py`. `score` imports only `features.blocks`; the script imports `io` and
 reads the positives, library and benchmark tables, and hands DataFrames in. Nothing imports `score`.
 
