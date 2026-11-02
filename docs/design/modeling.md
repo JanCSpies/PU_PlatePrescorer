@@ -31,7 +31,7 @@ are. Each writes a table, a report and, where rows can be dropped, a rejected ta
 | unlabeled U | `library/unlabeled.py`, `scripts/unlabeled.py` | the library, the positives, the benchmark validation set | `private/unlabeled/<class>/<family>.parquet`: every role-A × role-B library pair not in P of the family (by stereo keys); report: overlap of lab and validation substrates with P (flat keys) | `tests/test_unlabeled.py`; 284,600 pairs, 2 lab pairs in P against the rebuilt P of 2026-10-29 (284,595 and 7 before it) |
 | U literature | `positives/unlabeled.py`, `scripts/unlabeled_literature.py` | the positives at `family = "all"`, the U config | `unlabeled/<class>/<config>.parquet`: one row per drawn counter-pair, one side replaced from the same heavy-atom decile, P subtracted on flat pair keys | `tests/test_unlabeled_literature.py`; the joint size probe at ~0.5 against a uniform-U control |
 | S2a reliable negatives | `score/pu.py`, `scripts/score_pu.py` | features, positives, U, the S2 config | `pu/<class>/<config>.negatives.parquet`: one row per U pair and per spy, with its spy score and whether it is a reliable negative | `tests/test_score_pu.py`; realised spy recall equals the configured 0.95 |
-| S2b PU scores | `score/pu.py`, `scripts/score_pu.py` | features, positives, the S2a negatives, the validation pairs, the inventory grid | the stage S score layout, one row per (model, feature block, scored pair) | two runs identical; B2 and B8 reproduce from the shared pair assembly |
+| S2b PU scores | `score/pu_scores.py`, `scripts/score_pu_scores.py` (written and run on all six configurations, 2026-11-02) | features, positives, the S2a negatives, the validation pairs, the inventory grid | the stage S score layout, one row per (model, feature block, scored pair) | two runs identical; B2 and B8 reproduce from the shared pair assembly |
 | validation / test | `benchmarks/split.py`, `scripts/benchmark_split.py` | `private/benchmarks/<name>/labels.parquet`, the family from the class YAML | `private/benchmarks/<name>/<family>/validation.parquet` and `test.parquet` (split `test`); labelled reactions in the family only (`in_family`); the report records `shared_acids` and `shared_amines` | `tests/test_benchmark_split.py`; Chemlex HATU_DIPEA_DMF 2,615 / 1,313, 0 shared acids, 0 shared amines (flat keys) |
 
 ### Validation set (redefined 2026-10-22)
@@ -194,6 +194,7 @@ coverage on validation, inventory and P at both widths).
 | `in_positives`, `in_library`, `in_validation` | bool | where the key was seen (for M2's adversarial validation) |
 | `morgan` | `fixed_size_list<uint8>[2048]` | Morgan counts, radius 2, no chirality (counted max 51) |
 | `morgan_centre` | `fixed_size_list<uint8>[2048]` | the same fingerprint rooted at the reacting atom (added 2026-10-22) |
+| `morgan_near` | `fixed_size_list<uint8>[2048]` | the same fingerprint rooted at every atom within `distance` bonds of the reacting atom (added 2026-11-02) |
 | 10 descriptors | int16 | below |
 | `subclass` | string | role subclass; null for a role without subclasses |
 
@@ -246,6 +247,92 @@ is contained in another it has already recorded, and the sphere around a termina
 sphere around its neighbour. An amine N is usually terminal, so its radius-2 environment is missing from
 the full fingerprint and appears only here. The rooted column therefore adds information rather than
 only pointing at it.
+
+**A third block, `morgan_near`** (agreed 2026-11-02). It is the Morgan count fingerprint with the same
+settings as the other two (radius 2, 2,048 bits, no chirality). Its roots are every atom within
+`distance` bonds of the reacting atom, and each root contributes its radius-2 environments.
+`morgan_centre` is the same construction at distance 0. At a distance beyond the molecule's diameter it
+equals `morgan` bit for bit. The distance lives in `configs/features.yml`:
+
+    morgan_near:
+      radius: 2
+      n_bits: 2048
+      distance: 6
+
+The column name carries no number on purpose. ADR 030 selects the distance per reaction class: amide
+coupling gets 6, another class may get 3. A column called `morgan_d6` would lie for the next class, and
+stage S validates `feature_block` against a fixed set of names. The distance is recorded in the config
+and hashed into every run instead.
+
+Why 6 for this class is in ADR 030. In short: at distance 0 only 2.0 % of the 284,600 laboratory
+candidate pairs have a feature vector no other candidate shares, and the first stage S2b run gave its top
+96 pairs one single score shared by 1,300 pairs. The rule takes the smallest distance within 5 points of
+the best achievable share, which is 6 at 89.1 % against a best of 91.0 %.
+
+Containment is not what a reader will assume. The series is nested from distance 1 upward, but distance 0
+is special and can carry bits that no larger distance has. RDKit drops an environment whose bond set lies
+inside another it has recorded, so the radius-2 environment of a terminal reacting atom survives at
+distance 0 and is swallowed once its neighbour becomes a root. It holds on 7 of 14 fixtures (pivalic
+acid, tert-butylamine, aniline, benzylamine, 2-aminopyridine, 4-chloroaniline, ethylamine); on
+ethylamine it is bit 317. Command: `uv run pytest tests/test_features.py -k terminal_centre`
+(`test_near_loses_the_radius_two_bit_of_a_terminal_centre_at_the_first_step`). The far boundary and the
+containment claim: `uv run pytest tests/test_features.py -k "near_beyond_the_diameter or only_gains_bits"`. It is the same quirk the `morgan_centre` comment in `configs/features.yml`
+already records. I keep default RDKit and not `includeRedundantEnvironments=True`, because the redundant
+setting would break the bit-for-bit match between a large distance and `morgan`. That match is what makes
+the whole distance table comparable with the numbers already measured.
+
+Verification (tests written first; all 61 that were red are green on 2026-11-02, whole suite 765 passed,
+1 skipped, `ruff check .` and `mypy src` clean):
+- `morgan_near` at distance 0 equals `morgan_centre` exactly on every fixture.
+- Beyond the diameter it equals `morgan`.
+- Containment holds from distance 1 upward.
+- The terminal-atom exception is pinned by name.
+- The uint8 count guard is unchanged.
+- A missing or non-integer `distance` raises `ValueError` naming the file.
+- The stage F table carries the column, and `block_matrix` returns it as an (n, 2048) float64 matrix.
+
+The rebuild, run 2026-11-02 at 14:52:
+
+    uv run python scripts/features.py amide_coupling ~/University/Phd/Dataset/Datasets/derived \
+        --validation ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/HATU_DIPEA_DMF/validation.parquet
+
+The file went from 1,853,789 to 2,693,543 bytes. The rebuild left the two existing blocks untouched. I
+checked this and did not assume it, because every figure measured so far comes from those two columns, and
+a rebuild that had quietly altered them would have invalidated all of it without any test failing. The
+check was done once, at rebuild time on 2026-11-02, by comparing the rebuilt table against a copy of the
+previous one taken immediately before the run. The previous table no longer exists, so this check is not
+repeatable and is recorded on trust. If it is ever needed again, the way is to rebuild from the previous
+commit's code and compare, which is a reconstruction and not the same thing.
+
+The row count is 11,345 for the current table under `derived`. The 22,050 in the Output paragraph above
+(2026-10-22) is the same root at an earlier date: it predates the 2026-10-29 rebuild of P with the 20 %
+yield cut-off, which took the substrate table down with it. There is no feature table under
+`derived_samples`.
+
+| | before | after |
+|---|---|---|
+| rows | 11,345 | 11,345, same keys, same order |
+| `morgan` | | unchanged, bit for bit |
+| `morgan_centre` | | unchanged, bit for bit |
+| `morgan_near` | absent | present, equal to neither |
+
+Mean set bits per substrate: `morgan_centre` 3.0, `morgan_near` 26.8, `morgan` 34.2. These can be
+reproduced against the table as it stands:
+
+    uv run python -c "import numpy as np, pandas as pd; d = pd.read_parquet('~/University/Phd/Dataset/Datasets/derived/private/features/amide_coupling/substrates.parquet'); print({b: round(float((np.stack([np.asarray(v) for v in d[b]]) > 0).sum(1).mean()), 1) for b in ('morgan_centre', 'morgan_near', 'morgan')})"
+
+The 26.8 is also the value the d = 6 row reports in the seven-block table that ADR 030's rule was applied
+to:
+
+    uv run python scripts/counts/count_centre_distance.py ~/University/Phd/Dataset/Datasets
+
+The production code reproduces, by a different code path, the scratch measurement the
+decision was taken on. So the block in the stage is the block that was selected.
+
+Consequence: the feature table is rebuilt, and stages S2a and S2b are re-run under the new block. Every
+figure measured under `morgan_centre` for a fitted model is superseded for the primary line. That
+includes the 15,250 reliable negatives of the first S2a run and the four S2b score tables of 2026-11-02.
+They are kept and reported, not deleted, because the comparison across blocks is part of the result.
 
 **Subclasses.** The class YAML key `roles.<role>.subclasses` is an ordered list of `{name, smarts}`. Each
 SMARTS marks the reacting atom `:1`, and a subclass counts only when that atom is R; the first match wins
@@ -390,10 +477,16 @@ pair-assembly function, because one stage would need a branch between a pure fun
 and a fit-then-predict, and ADR 006 item 5 runs them weeks apart. They write the same columns, so
 stage E reads one layout. **S1 is built first** (Luka, 2026-10-21); the S2 inputs go to ADR 008.
 
-**Code.** `src/platepu/score/pairs.py` (pair rows and the feature matrix), `score/similarity.py`
+**Code.** `src/platepu/score/pairs.py` (pair rows, the feature matrix `pair_features`, the
+fingerprint-only matrix `pair_matrix`, and `substrate_index`, the one key lookup, which
+`score/similarity.fingerprints` now calls instead of holding its own copy), `score/similarity.py`
 (the stage's one per-side substrate similarity, public since 2026-10-30 because B2/B3/B8, the pair
 K-NN probe and ADR 023's base kernel are three callers) and `score/baselines.py`;
-`scripts/score_baselines.py`. `score` imports only `features.blocks`; the script imports `io` and
+`scripts/score_baselines.py`. Stage S2b adds `score/pu_scores.py` and `scripts/score_pu_scores.py`, both written and run (2026-11-02); S2a's `scripts/score_pu.py` is written and run too. Stage S2a adds four modules: `score/pu.py` (the spy step: `spy_labels`,
+`spy_threshold`, `reliable_negatives`), `score/pu_config.py` (`PuConfig`, its loader, `config_sha256`),
+`score/pu_fit.py` (the one place the learner is constructed, shared with S2b) and `score/pu_audit.py`
+(`score_deciles`, `selection_shift`). `score` imports `features.blocks` and, in `score/pu.py`,
+`io.strictest_licence` (CLAUDE.md §5 puts `io` below all stages); the script imports `io` and
 reads the positives, library and benchmark tables, and hands DataFrames in. Nothing imports `score`.
 
 **Inputs.** The feature table `private/features/<class>/substrates.parquet`; the positives at both
@@ -425,7 +518,10 @@ heavily tied: on the inventory 90.1 % of the aniline pairs share one B5 score (1
 `scratch/count_stage_s_inputs.py` section 3, re-counted 2026-10-22), so any ranking of them
 is a decision about ties and not about chemistry.
 
-**From substrate rows to a pair row.** `pair_matrix` joins the feature table twice, on
+**From substrate rows to a pair row.** Two functions in `score/pairs.py`, not one.
+`pair_matrix` returns only the chosen fingerprint block, the acid's columns and then the amine's,
+float64, one row per pair, and refuses any non-fingerprint block by name (ADR 008 item 1); the PU
+models use it. `pair_features` is the wider function described next. It joins the feature table twice, on
 `key_a_stereo` and on `key_b_stereo`, prefixing the columns `a_` and `b_`. Block order, returned with
 the matrix: the two Morgan blocks, the nine model descriptors of each side, then the one-hot subclass
 columns, whose categories come from the class YAML order plus `other` (five for the amine; the acid has
@@ -460,7 +556,7 @@ see `docs/decisions/008-hand-written-chemistry-belongs-in-the-opponent.md`), so 
   keeps B2 and B3 asking different questions. Because
   the similarity is per side, the two substrate-to-substrate matrices are small (529 lab acids against
   790 P acids, and 538 against 680) and are computed once; what remains is a reduction over
-  284,595 x 1,177 pair combinations at HATU width, and x 28,158 at class width, chunked at 5,000
+  284,595 (before the 2026-10-29 rebuild; now 284,600) x 1,177 pair combinations at HATU width, and x 28,158 at class width, chunked at 5,000
   scored pairs. A concatenated 4,096-bit version was measured instead at about 2 s and about 0.6 min,
   with 96 GB in one piece at class width, so chunking is needed either way.
 - **B3 additive:** per side, the Tanimoto to the single most similar P substrate of that role;
@@ -480,7 +576,8 @@ see `docs/decisions/008-hand-written-chemistry-belongs-in-the-opponent.md`), so 
   accepted and not rewritten; the correction is recorded here, in the journal, and in ADR 008.
 - **B8 nearest positive pair on `morgan_centre`** (declared 2026-10-23, **before** stage S2 ran).
   B2's definition on the rooted fingerprint. Measured **0.7115** on validation against B2's 0.6317,
-  from the same production code path. It sits below B4 (0.743), so it is not the binding bar; it
+  from the same production code path, on the pre-cut-off positives; after the rebuild of 2026-10-29 the
+  pair is **0.7221** and **0.632**. It sits below B4 (0.743), so it is not the binding bar; it
   exists to isolate what *fitting* adds over the same fingerprint with none. It is a **new** baseline
   and not a redefinition of B2, which ADR 012 item 4 forbids because B2 is named in a
   pre-registration.
@@ -505,7 +602,7 @@ ADR 008 item 7 requires beside every model is computed from stage F's `in_positi
 
 **Verification.** Tests first in `tests/test_score_pairs.py`, `tests/test_score_baselines.py` and
 `tests/test_score_script.py`, on open hand-written rows. A full run (seed 20261021, `std_version` 2)
-scores 2,615 validation pairs and 284,595 inventory pairs under ten (model, width) groups, 2,872,100
+scores 2,615 validation pairs and 284,595 inventory pairs (before the 2026-10-29 rebuild; now 284,600) under ten (model, width) groups, 2,872,100
 rows out, in 1 min 29 s (89.2 s wall, `/usr/bin/time -p`). A second run gave the identical table
 (`pd.testing.assert_frame_equal` passed on the before and after parquet). P has 1,177 HATU pairs and 28,158
 class pairs.
@@ -552,7 +649,8 @@ whole acids and whole amines by flat key (`uv run python scripts/counts/count_b2
 - Validation amine subclasses (113 stereo keys): aliphatic_secondary 34, aniline 30, heteroaryl_amine 27,
   aliphatic_primary 17, other 5.
 - Pair overlap with P: no validation pair is in P at either width, on stereo or flat keys. Inventory
-  pairs are: 406 on stereo keys and 669 on flat keys at the class width.
+  pairs are: 406 on stereo keys and 669 on flat keys at the class width (measured 2026-10-22 against the
+  pre-cut-off P; superseded by the counts in "S2b", 2026-11-02).
 - Narrowing P from the class to the HATU family hurts B2: B2 at the HATU width is ahead of B3 at the
   HATU width in only 18.6 % of resamples. The interval still covers zero.
 - A paired comparison here resolves about **0.05 AUC**. That is the size of edge a PU model has to
@@ -711,20 +809,165 @@ recorded value and not a branch; any other value raises.
 `unlabeled` (the U config stem), `spy_fraction`, `spy_recall: 0.95`, `spy_scoring`
 (`out_of_fold` | `in_sample`), `n_folds`, `learner`, `learner_params`, `seed`.
 
-**S2a output.** `<root>/pu/<class>/<config-stem>.negatives.parquet`, open like U. Columns: the four
-pair keys, `in_p` (true for a spy), `fold`, `spy_score` (float32), `reliable_negative`, `threshold`,
-plus `model`, `feature_block`, `seed`, `config_sha256`, `std_version`, `licence`. Its report is the
+**S2a output.** `<root>/pu/<class>/<config-stem>.negatives.parquet`. Columns: the four
+pair keys, `in_p` (true for a spy), `weight` (1.0 on a positives row and on a spy, `n_draws` on a U row; ADR 029), `fold`, `spy_score` (float32), `reliable_negative`, `threshold`,
+plus `model`, `feature_block`, `seed`, `config_sha256`, `std_version`, `licence`. The table carries
+**one** licence for all rows, the strictest of P's and U's (`io.strictest_licence`), as
+`scripts/score_baselines.py` already does for stage S1. Today that is `open`, because P and U are
+100 % `open` (12,023 rows in the whole positives table, both family widths, the class width the model trains on being 11,396; 102,200 rows in U; counted 2026-10-30). **Open question for Luka and
+data-guardian, not a decision:** this does not close a gap that S1 shares. The feature table's own
+licences are not considered, and of the 10,641 substrates the fit reads, 535 are `internal` and 16
+`noncommercial`. The same reasoning applies (incomplete, not wrong, until a private-only substrate enters
+P or U); it is written under "Licence" in the S2b section. Its report is the
 audit record: spies, configured and realised recall, both thresholds, the number of reliable negatives
-and their share of U, the spy and U score deciles, and **the shift the selection introduces** — the
+and their share of U by rows and, as `reliable_negative_share_weighted`, by draws (ADR 029), the spy and U score deciles, and **the shift the selection introduces** — the
 marginal distance of the reliable negatives against U as a whole, their mean heavy-atom count against
-U's, their single-partner share. U was built to match P's marginals and the threshold breaks that
+U's, their single-partner share (the share of a set's distinct substrates that appear in exactly one of
+its pairs, both roles pooled). U was built to match P's marginals and the threshold breaks that
 match on purpose; how far it breaks it is the number a later reader will want.
 
-**S2b output** is the stage S layout unchanged, so stage E keeps reading one table. **Reported beside
-every model** (ADR 008 item 7): the adversarial ROC-AUC of the block actually used, per role, with its
-bootstrap interval and its size-adjusted value — the estimate rests on 11,203 literature-only acids
-against 189 lab-only ones, intervals about ±0.04, so a gap under 0.04 is not a gap (ADR 012 item 2) —
-the mean heavy-atom count of each scored set, and the pointer to B7.
+### S2b — the final fit and the two arms (designed 2026-11-02, ADR 028, ADR 029)
+
+**Two arms, both blocks, four runs.** The spy arm (primary, ADR 014 item 1) fits P against the reliable
+negatives. The naive arm (secondary, ADR 016 item 2) fits P against all of U. They differ in one thing,
+where the negative class comes from. Both run on `morgan_centre` and on `morgan`, so S2b is four runs
+and four config files: `pu_score_spy_morgan_centre.yml`, `pu_score_spy_morgan.yml`,
+`pu_score_naive_morgan_centre.yml`, `pu_score_naive_morgan.yml`. Each is one fit and one table. I chose
+the extra fits on 2026-11-02 (ADR 028 item 6).
+
+**Config.** S2b has its own record, `PuScoreConfig`, in `score/pu_config.py` beside `PuConfig`. It has
+eight keys and none is inert in either arm. The naive arm needs no `spy_fraction`, `spy_recall`,
+`spy_scoring` or `n_folds`, and a file that carried them would claim spies were drawn.
+
+    model: pair_hgb_spy                    # pair_hgb_naive in the naive arm (stage E needs no lookup)
+    feature_block: morgan_centre           # morgan | morgan_centre, as in S2a
+    p_width: all                           # the class width, 11,396 positives
+    unlabeled: unlabeled_literature_k10
+    negatives: pu_spy_morgan_centre        # the S2a config stem; null in the naive arm
+    learner: HistGradientBoostingClassifier
+    learner_params:
+      max_iter: 200
+      early_stopping: false
+    seed: 20261102
+
+`negatives` picks the arm. A stem names the S2a config whose `<stem>.negatives.parquet` supplies the
+negative class. `null` means this run reads no such table and trains against all of U, the same
+convention S1 uses for `feature_block`.
+
+**The pointer is checked.** S2b loads the named S2a config. It raises unless `feature_block`, `p_width`,
+`unlabeled`, `learner` and `learner_params` agree with its own, and unless that record's value hash
+equals the single distinct `config_sha256` in the negatives table. A table cut under `morgan` is never
+fitted under `morgan_centre`. The spy settings stay traceable through that hash and are not copied.
+
+**Training set, exactly.**
+
+| arm | positive class | negative class | weight |
+|---|---|---|---|
+| spy | the 11,396 positives of P **plus the spies**, which rejoin P | the reliable negatives of the S2a table | 1.0 per positives row; `n_draws` per U-derived row |
+| naive | the 11,396 positives of P | every row of U | 1.0 per positives row; `n_draws` per U row |
+
+The spies rejoin P because the draw existed only to place a threshold, and a spy is a reported
+positive. `reliable_negative` is never true on a spy, so no row enters twice; the script asserts it by
+checking that the flat pair keys of P and of the reliable negatives are disjoint. Every fit is weighted
+and a spy weighs 1.0 (ADR 029 items 1 and 2). The P:U ratio is quoted by rows and by draws.
+
+**Scored sets.** `validation` (2,615 Chemlex pairs) and `inventory` (284,600 lab pairs): 287,215 rows per
+run. The literature U is **not** scored. In the naive arm it is the training negative class; in the spy
+arm it is the pool the negatives were cut from.
+
+**One fit, no cross-fitting.** Some scored pairs are in training. Counts, `uv run python scratch/count_s2b_inputs.py ~/University/Phd/Dataset/Datasets`, run 2026-11-02
+(output in `scratch/count_s2b_inputs.out.txt`):
+
+| scored set | in | keys | pairs | share of the set |
+|---|---|---|---|---|
+| validation | P | stereo and flat, both widths | 0 | 0 |
+| validation | U | stereo and flat | 1 | 0.038 % of 2,615 |
+| inventory | P, class width | stereo | 208 | 0.073 % |
+| inventory | P, class width | flat | 267 distinct pairs in 335 rows | 0.118 % |
+| inventory | P, HATU width | stereo | 0 | 0 |
+| inventory | U | stereo | 1,587 | 0.558 % |
+| inventory | U | flat | 1,925 distinct pairs in 2,307 rows | not given |
+
+The one validation pair in U carries `n_draws` 1 and matches on flat keys too. Its substrate keys
+are deliberately **not** written here: a Chemlex row's identity is a row of a CC BY-NC-ND set, which
+CLAUDE.md §9 and ADR 009 keep out of anything we share, and the count above is what a reader needs.
+It is recoverable from the two tables with the command in this section. The flat inventory has
+duplicate rows, which is why rows and distinct pairs differ.
+
+The 406 and 669 of 2026-10-22 are superseded. They were measured against the pre-cut-off P and are not
+comparable, not wrong. The likely cause, which I have not verified, is that `positives.parquet` was
+rebuilt on 2026-10-29 and the 20 % cut-off took P from 28,158 reported pairs to 11,396 positives (the split is recorded, with its command, in ADR 024, Context), so a
+smaller P subtracts less; the same file records that the rebuild moved the lab pairs in P from 7 to 2.
+The old "about 0.14 %" is withdrawn; the figure is 0.073 % on stereo keys.
+
+**These pairs are reported and never removed.** The validation pair sits in the training negative class
+in the naive arm and in the pool the negatives are cut from in the spy arm. Filtering U by membership in
+the validation split would use the evaluation set to decide what may be trained on, the same leakage
+turned around as in "The substrate overlap is reported and never removed". The 1,587 inventory pairs in U
+are scored by a model that trained on them as the negative class, 1,587 times the situation of the single
+validation pair, on the set the plate is picked from. They are counted in the report, not removed.
+**Effect on the plate, to report:** those pairs are trained on as the negative class, so their scores are
+pushed down, and the plate is picked from the top of the inventory ranking. U was drawn from P's own
+substrates, so these 1,587 are pairs with literature-like substrates, the ones a "looks publishable"
+model would otherwise rank highest. The effect is therefore not a harmless nudge on an AUC: it steers the
+plate systematically away from 0.56 % of the grid. **Open for Luka, not decided here:** whether anything
+should be done about it. Removing them from U would use a scoring set to shape the training data, the same
+class of error as removing the validation pair. For the validation pair the bias is conservative: a pair told "not known to work" is scored lower, so a Chemlex success among them
+pushes the validation AUC down, not up. The inventory pairs in P get an in-sample score. Dropping any of
+these would filter a scoring set; cross-fitting only them would put two kinds of score inside one
+`score_set`.
+
+**Output.** `<root>/private/scores/<class>/<family>/<config-stem>.parquet` and `.report.json`, under
+`private/` because the inventory pairs are internal (ADR 004). The columns are **S1's eleven, in S1's
+order** (`score_set`, `key_a_stereo`, `key_b_stereo`, `score`, `model`, `feature_block`, `p_width`,
+`seed`, `config_sha256`, `std_version`, `licence`), `score` float32. `feature_block` is never null for
+a PU model. There is no rank column.
+
+**Licence.** Per scored set, widened by the training side through `io.strictest_licence`: the validation
+rows carry `noncommercial` and the inventory rows `internal`, as `scripts/score_baselines.py` already
+writes them. **Open, a question for Luka and data-guardian, not a decision:** the feature table's own
+licences are not in the merge (535 `internal` and 16 `noncommercial` of the 10,641 substrates the fit
+reads). The gap is the one S1 and S2a share, and it bites harder here, because the fitted model then
+scores the plate. **Assessed 2026-11-02 (pr-reviewer): incomplete, not wrong,** for a structural reason.
+The matrix the fit sees is only the fingerprint rows of the P and U pairs, and both tables are built from
+the open positives, so every number entering the fit is a Morgan count of a molecule in an open corpus.
+The `internal` (535) and `noncommercial` (16) stamps on those feature rows record co-occurrence with the
+lab inventory or with validation; that fact never reaches the fit, because the script reads `key_stereo`,
+the block, `n_heavy_atoms` and `std_version`, and not `in_library` or `in_validation`. **It becomes wrong
+the day a substrate whose structure comes only from a private source enters P or U.**
+
+**Report.** Provenance and the two config hashes (the S2b record's and, in the spy arm,
+`spy_config_sha256`); `arm`, `negatives`; `n_positives`, `n_negatives`, `negative_source`; the P:U ratio
+by rows and by draws and `n_draws_sum`; rows in and out per scored set, and the number of scored pairs found in P and in U on each key type (287,215 = 2,615 + 284,600, arithmetic on the two set sizes; the 284,600 comes from `scripts/unlabeled.py`, command at the 2026-10-29 rebuild note in "Stage U" of this file, around line 345). Beside every model, as ADR 008
+item 7 requires: the adversarial ROC-AUC of the block used, per role, with its bootstrap interval and
+size-adjusted value (intervals about ±0.04, so a gap under 0.04 is not a gap, ADR 012 item 2); the mean
+heavy-atom count of each scored set; and B7 as a **pointer** to the baselines report, not a recomputed
+metric. The label-free diagnostics: score deciles, the tie structure, the Spearman correlation of score
+against pair heavy atoms, and the scored-in-training overlap on stereo and flat keys.
+
+**S2b must not** compute a metric against a label, read a label or any `test.parquet`, choose between its
+four configurations, or search hyperparameters. The validation ROC-AUC is read afterwards by a count
+script, as `scripts/counts/count_baseline_aucs.py` does for S1.
+
+**Verification,** tests first, on hand-written open rows:
+
+1. A config with `negatives: null` loads; one carrying `spy_fraction` raises as an unknown key.
+2. A spy-arm config that disagrees with its named S2a config raises; so does a negatives table whose
+   `config_sha256` is not that config's.
+3. A negatives table with two distinct `config_sha256` values raises.
+4. A planted separable case in which every scored pair's side of the boundary is written by hand.
+5. S1's eleven columns in order, `score` float32, and the two licences.
+6. A P row that is also a reliable negative raises.
+7. A missing substrate and a mixed `std_version` raise.
+8. Two runs give identical tables and reports but for timestamps.
+9. The full run reproduces 11,396 positives and 287,215 rows out.
+
+**Status, 2026-11-02.** Code written: `score/pu.py`, `pu_config.py`, `pu_fit.py`, `pu_audit.py`,
+`pu_scores.py` and `scripts/score_pu.py`, `scripts/score_pu_scores.py`. S2a run on all three feature
+blocks: `<root>/pu/amide_coupling/pu_spy_{morgan_centre,morgan,morgan_near}.negatives.parquet`. S2b run on
+all six configurations: `<root>/private/scores/amide_coupling/HATU_DIPEA_DMF/pu_score_{spy,naive}_{morgan_centre,morgan,morgan_near}.parquet`,
+287,215 rows each. The validation read was spent once, by `scripts/counts/count_pu_aucs.py`; its six
+numbers are in the journal entry of 2026-11-02 (the day's last entry) and are not repeated here.
 
 **Stage S2 must not** compute a metric against a benchmark label, read a label or any `test.parquet`,
 choose between configurations, or search hyperparameters. The strata, the comparisons and every

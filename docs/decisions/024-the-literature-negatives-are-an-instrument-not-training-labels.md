@@ -1,7 +1,7 @@
 # 024 — The literature negatives are an instrument, not training labels
 
 - **Status:** Accepted, 2026-10-30
-- **Supersedes:** — · **Superseded by:** —
+- **Supersedes:** — · **Superseded by:** 027 in part (item 1)
 
 This record documents an intent that is already in the code and gives its reasons. It changes no code
 today. It supersedes nothing: ADR 013 item 3 (the spy technique) and ADR 014 item 1 (the spy threshold

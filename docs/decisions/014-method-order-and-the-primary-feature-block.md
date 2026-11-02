@@ -1,7 +1,7 @@
 # 014 — The order methods are tried in, and which feature block is primary
 
 - **Status:** Accepted, 2026-10-23, **before stage S2 was written**
-- **Supersedes:** 013 in part (it left both of these open) · **Superseded by:** —
+- **Supersedes:** 013 in part (it left both of these open) · **Superseded by:** 018 in part (item 2) · 030 in part (item 2)
 
 ADR 013 is Accepted and is not rewritten (CLAUDE.md §8). It was written hours ago and nothing has been
 run against it, but the rule holds anyway: this record completes it rather than editing it, so that

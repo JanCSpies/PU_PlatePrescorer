@@ -1,7 +1,7 @@
 # 026 — The spy step is a heuristic, because both estimators out of SCAR need the separability I removed
 
 - **Status:** Accepted, 2026-10-30
-- **Supersedes:** — · **Superseded by:** —
+- **Supersedes:** — · **Superseded by:** 027 in part (item 2)
 
 This record changes no code. It supersedes nothing. ADR 013 item 3 (the spy technique, chosen over
 estimating the class prior) stands as written. What changes is the reason it stands, and what the step is
