@@ -1,0 +1,50 @@
+# Stage S2, the spy step, PRIMARY configuration from 2026-11-02 (ADR 030) (docs/design/modeling.md "Stage S2"; ADR 013 item 3,
+# ADR 014 items 1 and 2, ADR 016, ADR 024, ADR 026). Every value here is hashed into every score row.
+model: pair_hgb
+# `morgan_near` at distance 6, chosen by the label-free rule of ADR 030: the smallest distance whose
+# share of uniquely-resolved pairs on the set to be scored is within 5 points of the best achievable.
+# At distance 0 (`morgan_centre`) only 2.0 % of the 284,600 laboratory candidate pairs have a feature
+# vector no other candidate shares, and the first S2b run could not rank a plate -- its top 96 pairs
+# shared one score with 1,300 others. The distance lives in `configs/features.yml`, not in this name.
+# The other two blocks keep their own runs beside this one; the reliable negatives depend on the block.
+feature_block: morgan_near
+# The class width, 11,396 positives, which is what the model trains on (ADR 008 item 8).
+p_width: all
+unlabeled: unlabeled_literature_k10
+
+# MEASURED, not inherited from PAYN (ADR 026 item 5): PAYN's 0.2 was tuned at P:U = 1:1 and ours is
+# about 1:9.7, so the value had to be measured at our ratio before it could be fixed.
+#
+# The measurement (journal 2026-11-02; run 2026-10-30 on the group cluster,
+# `bash scratch/run_spy_fractions.sh ~/University/Phd/Dataset/Datasets 4`, two blocks x four
+# fractions x two seeds x two scorings) says the thing it was asked to decide **cannot** be decided
+# on it: the share of the 1,121 known literature negatives the step catches, over the share of U it
+# calls reliably negative, is far below 1 at every fraction -- 0.26 to 0.36 on morgan_centre -- and
+# the differences between fractions are at or near the seed-to-seed spread.
+#
+# What does discriminate is the threshold's footing. At 0.01 there are 114 spies, so the 95 % cut
+# rests on about five rows; at 0.20 there are 2,279 and it rests on about 114. The cost is nil,
+# because stage S2b fits the final model on all of P -- a larger fraction only thins the positives
+# the spy classifier sees, leaving 9,117. Luka fixed 0.20 on 2026-11-02 for that reason, and not
+# because PAYN used it.
+spy_fraction: 0.20
+spy_recall: 0.95
+# Out of fold is primary (ADR 016 item 1): a spy sits in its own training set labelled unlabeled, so
+# a flexible learner can partly memorise it, and because every U row carries that same label the
+# direction of the contamination is neither known nor bounded. The report carries the in-sample
+# threshold and set size beside it either way, so PAYN's choice is a measurement here, not an
+# assumption; a table under in-sample scoring is a second config file, never a code path.
+spy_scoring: out_of_fold
+n_folds: 5
+
+# A recorded value, not a branch: any other learner raises and arrives with its own measurement and
+# its own record (ADR 016 item 3).
+learner: HistGradientBoostingClassifier
+learner_params:
+  # Written out, both of them. Left to itself scikit-learn turns early stopping on above 10,000 rows
+  # -- ours is about 114,000 -- and carves an internal validation split with a seed we did not set,
+  # which CLAUDE.md §5 calls hidden state. 200 rounds is what every measurement in this project has
+  # used (`score/axes.py`, the spy sweep).
+  max_iter: 200
+  early_stopping: false
+seed: 20261102

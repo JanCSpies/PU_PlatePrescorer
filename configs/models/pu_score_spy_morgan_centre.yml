@@ -1,0 +1,25 @@
+# Stage S2b, the final fit. Spy arm, primary block (docs/design/modeling.md "S2b"; ADR 028, ADR 029).
+# Every value here is hashed into every score row, by value and not by file (`config_sha256`).
+#
+# The spy arm is the PRIMARY method (ADR 014 item 1) and stays so whatever the naive arm scores. If
+# the naive arm wins, that is reported as "the choice of PU method changed the answer by X", not as
+# a substitution; Luka kept ADR 014 item 1 on 2026-11-02, before any validation read.
+model: pair_hgb_spy
+# morgan_centre is the primary block (ADR 014 item 2). This must agree with the S2a config named
+# below, because the reliable negatives it trains on were cut under that block, and the script
+# refuses the pair if it does not.
+feature_block: morgan_centre
+# The class width, 11,396 positives (ADR 008 item 8). Not the HATU family.
+p_width: all
+unlabeled: unlabeled_literature_k10
+# **The arm.** This names the S2a config whose <stem>.negatives.parquet supplies the negative class.
+# The run of 2026-11-02 cut 15,250 reliable negatives under it, 0.1492 of U's rows and 0.1464 of its
+# draws. `null` here would be the naive arm instead.
+negatives: pu_spy_morgan_centre
+learner: HistGradientBoostingClassifier
+learner_params:
+  # Must match the S2a config's exactly, or the script refuses the pointer: a model fitted under
+  # different learner settings than the ones that chose its negatives is two experiments in one.
+  max_iter: 200
+  early_stopping: false
+seed: 20261102

@@ -1,0 +1,30 @@
+# Stage S2b, the final fit. Naive arm, primary block (docs/design/modeling.md "S2b"; ADR 028, ADR 029).
+# Every value here is hashed into every score row, by value and not by file (`config_sha256`).
+#
+# The spy arm is the PRIMARY method (ADR 014 item 1) and this one is the control beside it. If this
+# arm wins, that is reported as "the choice of PU method changed the answer by X", not as a
+# substitution; Luka kept ADR 014 item 1 on 2026-11-02, before any validation read.
+model: pair_hgb_naive
+# morgan_centre is the primary block (ADR 014 item 2). This must agree with the S2a config named
+# below, because the reliable negatives it trains on were cut under that block, and the script
+# refuses the pair if it does not.
+feature_block: morgan_centre
+# The class width, 11,396 positives (ADR 008 item 8). Not the HATU family.
+p_width: all
+unlabeled: unlabeled_literature_k10
+# **The arm.** `null` means there is no reliable-negative table: train P against ALL of U, weighted
+# by `n_draws`, and use the raw probability as the ranking (ADR 016 item 2, ADR 028 item 2).
+#
+# This arm exists to answer what the spy step bought, and the first S2a run made that question
+# heavier rather than lighter: the reliable negatives came out larger than U (33.78 heavy atoms
+# against 32.36 on this block) and thinner (36 % of their substrates appear in exactly one pair,
+# against 0 % anywhere in U), while the inventory grid the plate is picked from averages 23.73. This
+# arm touches none of that. It is still SECONDARY (ADR 014 item 1) whatever it scores.
+negatives:
+learner: HistGradientBoostingClassifier
+learner_params:
+  # The same learner settings as the spy arm, so the two arms differ in one thing only: where the
+  # negative class comes from. `early_stopping` is written out for the reason ADR 016 item 3 gives.
+  max_iter: 200
+  early_stopping: false
+seed: 20261102
