@@ -1,4 +1,4 @@
-"""Writing stage outputs: tables with a licence guard, and a report with provenance.
+"""Reading and writing stage tables: a licence guard on the way out, and a report with provenance.
 
 Every stage writes ``X.parquet`` and ``X.report.json``, and ``X.rejected.parquet`` where it rejects
 rows (docs/design/rebuild.md, "Principles"). Rows not licensed ``open`` -- Pistachio (``licensed``),
@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
@@ -200,3 +201,30 @@ def _version(package: str) -> str | None:
         return version(package)
     except PackageNotFoundError:
         return None
+
+
+def read_table(path: Path, columns: list[str], what: str) -> pd.DataFrame:
+    """One input table, with an explicit column list, or a ValueError naming which input it was.
+
+    The column list is as much the point as the reading: a stage that names its columns cannot be
+    handed one it never asked for, which is how stage S keeps a benchmark label out of the process.
+
+    pandas names the missing path on its own, which is the less useful half. Several of the paths a
+    stage builds come from **config keys** -- a stage U stem, an S2a stem, a feature block -- so a
+    reader needs to know which key sent it to a file that is not there. This lived in
+    ``scripts/score_pu.py`` until 2026-11-02, when stage S2b needed the same thing and a second copy
+    would have been the duplication §5 forbids.
+
+    Raises:
+        ValueError: no file at ``path``, naming ``what`` and the path.
+    """
+    if not path.exists():
+        raise ValueError(f"{what} is missing: no file at {path}")
+    # The columns are checked against the schema rather than left to the reader, because pyarrow's
+    # own refusal is `No match for FieldRef.Name(morgan_near) in key_stereo: string\nmorgan: ...`,
+    # an internal schema dump that names neither the input nor the config key that asked for the
+    # column, and gives no hint that the stage which writes it must be re-run.
+    absent = [name for name in columns if name not in set(pq.read_schema(path).names)]
+    if absent:
+        raise ValueError(f"{what} lacks column(s) {absent}: {path}")
+    return pd.read_parquet(path, columns=columns)

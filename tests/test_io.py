@@ -304,3 +304,60 @@ def test_null_among_valid_licences_stops_strictest_licence() -> None:
     """A null is not a licence: it must not be skipped on the way to "internal" or "open"."""
     with pytest.raises(ValueError, match="unknown licence"):
         strictest_licence(["open", None])  # type: ignore[list-item]
+
+
+def test_read_table_returns_only_the_requested_columns(tmp_path: Path) -> None:
+    """The explicit column list is the point: a column not asked for (a label) never arrives.
+    (read_table is imported here so that, until it exists, only its own tests fail.)"""
+    from platepu.io import read_table
+
+    path = tmp_path / "pairs.parquet"
+    pd.DataFrame(
+        {"key": ["a", "b"], "licence": ["open"] * 2, "label": [0, 1]}
+    ).to_parquet(path)
+    frame = read_table(path, ["key", "licence"], "the pairs")
+    assert list(frame.columns) == ["key", "licence"]
+    assert len(frame) == 2
+
+
+def test_read_table_names_the_path_and_the_input_when_the_file_is_missing(
+    tmp_path: Path,
+) -> None:
+    """The error says which input is missing and where it was looked for."""
+    from platepu.io import read_table
+
+    path = tmp_path / "nowhere.parquet"
+    with pytest.raises(ValueError, match="the positives table") as error:
+        read_table(path, ["key"], "the positives table")
+    assert str(path) in str(error.value)
+
+
+def test_read_table_names_the_missing_column_the_input_and_the_path(
+    tmp_path: Path,
+) -> None:
+    """A file that exists but lacks one of the requested columns (stage F written before
+    morgan_near was added, 2026-11-02): ValueError naming the input, exactly the missing column and
+    the path, not pyarrow's ArrowInvalid with a schema dump. The columns that are there are not
+    named, so the message points at the one thing to fix."""
+    from platepu.io import read_table
+
+    path = tmp_path / "substrates.parquet"
+    pd.DataFrame({"key_stereo": ["a"], "morgan": [1]}).to_parquet(path)
+    with pytest.raises(ValueError, match="the feature table") as error:
+        read_table(path, ["key_stereo", "morgan", "morgan_near"], "the feature table")
+    message = str(error.value)
+    assert "morgan_near" in message
+    assert str(path) in message
+    assert "key_stereo" not in message
+    assert "morgan'" not in message
+
+
+def test_read_table_names_every_missing_column(tmp_path: Path) -> None:
+    from platepu.io import read_table
+
+    path = tmp_path / "substrates.parquet"
+    pd.DataFrame({"key_stereo": ["a"]}).to_parquet(path)
+    with pytest.raises(ValueError, match="the feature table") as error:
+        read_table(path, ["key_stereo", "morgan", "morgan_near"], "the feature table")
+    assert "morgan_near" in str(error.value)
+    assert "'morgan'" in str(error.value)
