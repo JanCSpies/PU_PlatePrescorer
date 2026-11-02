@@ -5,6 +5,434 @@ interpretation → next. Every number can be regenerated with the commands in it
 
 ---
 
+## 2026-11-02 — The single validation read was spent, and every PU configuration lost to every baseline (the day's last entry)
+
+**Context.** ADR 031 fixed the protocol before I saw any number: the primary configuration, the metric, the
+interval, and that all six configurations are reported whatever they score. It also records, before the read,
+that a null result would be a contribution and not a failure, given the three published results in the memo
+note of the same date.
+
+**Done.** One command, run once:
+
+    uv run python scripts/counts/count_pu_aucs.py ~/University/Phd/Dataset/Datasets \
+        ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/HATU_DIPEA_DMF/validation.parquet
+
+2,615 validation pairs, 762 positive (29.1 %), 2,000 substrate resamples, seed 20261102. The script refuses any
+file not named `validation.parquet`. Before the read I checked that refusal by handing it `test.parquet`. The
+test side is untouched.
+
+**Result.** AUC on the validation pairs, same command as above:
+
+| configuration | distinct scores | AUC | 95 % interval |
+|---|---|---|---|
+| naive, `morgan` | 2,251 | 0.4618 | [0.4108, 0.5106] |
+| naive, `morgan_centre` | 478 | 0.4825 | [0.4377, 0.5242] |
+| naive, `morgan_near` | 2,126 | 0.4697 | [0.4179, 0.5212] |
+| spy, `morgan` | 2,608 | 0.5243 | [0.4653, 0.5805] |
+| spy, `morgan_near` (primary) | 2,603 | 0.5503 | [0.4791, 0.6237] |
+| spy, `morgan_centre` | 595 | 0.6233 | [0.5654, 0.6798] |
+
+Baselines, read on 2026-10-29 and not re-run today (point values; I do not have their intervals at hand):
+
+    uv run python scripts/counts/count_baseline_aucs.py ~/University/Phd/Dataset/Datasets \
+        ~/University/Phd/Dataset/Datasets/derived_samples/private/benchmarks/chemlex/HATU_DIPEA_DMF/validation.parquet
+
+| baseline | AUC |
+|---|---|
+| B6 | 0.8221 |
+| B4 | 0.7426 |
+| B8 (class width) | 0.7221 |
+| B2 (class width) | 0.632 |
+| B7 (molecular size) | 0.5982 |
+
+Spy minus naive on the same block (computed from the table above, no new run):
+
+| block | difference |
+|---|---|
+| `morgan` | 0.0625 |
+| `morgan_near` | 0.0806 |
+| `morgan_centre` | 0.1408 |
+
+**Interpretation.** Five readings.
+
+1. Every PU configuration loses to every baseline. The best, 0.6233, sits below B2 (0.632), and its interval
+   tops out at 0.680, under B8 (0.7221). This is an interval-to-point comparison, because the baselines'
+   own intervals are not in hand.
+2. Five of the six are below molecular size alone (B7, 0.5982) outright. The sixth, spy `morgan_centre`
+   (0.6233), is above it as a point value, but its interval [0.565, 0.680] contains 0.5982, so it cannot be
+   shown to be above size alone either.
+3. The naive arm is at chance: 0.46 to 0.48, every interval covers 0.5. Ranking P against U carries no
+   validation signal.
+4. My prediction failed, in the opposite direction. ADR 031 records, written before the read, that I
+   expected `morgan` to beat `morgan_centre` for fitted models. `morgan_centre` is the best of the six, and
+   `morgan` is the worst of the spy arm. I wrote the prediction down so that it could fail, and it did.
+5. The spy step bought something, and the question in ADR 016 item 2 now has a number. The spy arm beats
+   the naive arm on all three blocks, by 0.06 to 0.14. It is a consistent gain from a low base, and not
+   enough to matter.
+
+One qualification. The block that the rule in ADR 030 selected (`morgan_near`, 0.5503) scored below the block
+the rule disqualified (`morgan_centre`, 0.6233). Their intervals overlap, [0.479, 0.624] against
+[0.565, 0.680], so by this project's own standard that is not a difference. The rule solved the tie problem it
+was written for. The read does not show that it chose a worse block, and it does not show that it chose a
+better one.
+
+**Next.** Nothing is tuned and nothing is re-run in search of a better figure. That is what ADR 031 was
+written to prevent. What follows is my decision, taken knowing the number: whether the project continues as
+framed, and in what form the result is written up. The mechanism behind the null is already measured and
+recorded. The P-against-U objective cannot separate reported failures from reported successes (AUC 0.46 to
+0.48, ADR 027), so the model learned "looks publishable" and not "works".
+
+## 2026-11-02 — The primary S2b model could not rank the plate; the block is the cause (the day's fifth entry)
+
+**Context.** S2b ran for the first time today. The top 96 inventory pairs all had score 0.993091, shared by
+1,300 pairs. That is a tie-break, not a prediction.
+
+**Done.** Counted why. Then swept the class ratio. Then measured how many candidate pairs each block can tell
+apart.
+
+    uv run python scratch/count_top_tie_cause.py ~/University/Phd/Dataset/Datasets
+    PYTHONPATH=scratch uv run python scratch/count_resolution_bar.py ~/University/Phd/Dataset/Datasets
+
+**Result.** The 1,300 tied pairs have one feature vector between them. The ratio sweep did not help:
+
+| effective class ratio | distinct scores in top 96 | note |
+|---|---|---|
+| 1:1.4, 1:2.8, 1:5.7, 1:10.0, 1:19.9 | at most 2 | top tie 5,292 at 1:2.8 |
+
+Command for the sweep: the same run as the first command above (one script, both halves share a fit
+setup, so they are comparable). Share of the 284,600 inventory pairs with a count vector no other pair
+shares (second command above):
+
+| d | inventory | validation | literature positives |
+|---|---|---|---|
+| 0 | 2.0 % | 27.5 % | 10.1 % |
+| 3 | 68.3 % | 99.7 % | 71.9 % |
+| 6 | 89.1 % | 99.7 % | 90.3 % |
+| all | 91.0 % | 99.7 % | 97.7 % |
+
+Full table in ADR 030, Context 4.
+
+**Interpretation.** My hypothesis that the near-balanced spy ratio saturated the probabilities was wrong. The
+representation is the cause: at d = 0 only 2 % of the plate's candidates are distinguishable. Validation
+saturates at d = 3 and the inventory only at d = 6, so a rule built on validation would have missed it. I
+decided, before any validation read, that the block is chosen by a label-free rule (smallest d within 5
+points of the best resolution on the set to be scored). It gives d = 6 for amide coupling, and also at a
+2-point margin. ADR 030 records it, and edits only the `Superseded by:` lines of ADR 014 and ADR 018. The
+rule has been applied to one class only.
+
+**Next.** Tests first, then add the block to `configs/features.yml` and `features/substrate.py`. Rebuild the
+feature table, re-run S2a and S2b, and keep the `morgan_centre` tables for the comparison.
+
+## 2026-11-02 — Stage S2a ran on the real data for the first time (the day's fourth entry)
+
+**Context.** Until today the spy step was tested code with no entry point. `scripts/score_pu.py` did not
+exist, so no S2a number existed either. The `n_draws` fix (ADR 029) is in, so the fit is weighted.
+
+**Done.** Wrote `scripts/score_pu.py`, tests first (`tests/test_score_pu_script.py`, 14 cases). Gate:
+
+    uv run ruff check .
+    uv run ruff format --check . && uv run mypy src && uv run pytest -q
+
+ruff and `ruff format --check` clean on 167 files, `mypy src` clean on 39, pytest 623 passed, 1 skipped. Then both
+feature blocks, once each:
+
+    uv run python scripts/score_pu.py amide_coupling ~/University/Phd/Dataset/Datasets/derived \
+        --config configs/models/pu_spy_morgan_centre.yml
+    uv run python scripts/score_pu.py amide_coupling ~/University/Phd/Dataset/Datasets/derived \
+        --config configs/models/pu_spy_morgan.yml
+
+Each wrote `<root>/pu/amide_coupling/<stem>.negatives.parquet` and `<stem>.negatives.report.json`, 104,479 rows
+each = 102,200 U pairs + 2,279 spies. Time and memory are not in the report. I measured them by putting
+`/usr/bin/time -l` in front of each `uv run` line above (shown here for the first):
+
+    /usr/bin/time -l uv run python scripts/score_pu.py amide_coupling ~/University/Phd/Dataset/Datasets/derived --config configs/models/pu_spy_morgan_centre.yml
+
+| | morgan_centre | morgan |
+|---|---|---|
+| wall clock, real | 244.32 s | 262.36 s |
+| maximum resident set size | 10,880,483,328 bytes | 11,731,271,680 bytes (of 51.5 GB) |
+
+**Result.** Every figure below, except the 23.73 and the 0.1455 sourced after the table, is in the `.report.json` next to the table (the paths above). Both runs:
+`spy_fraction` 0.20, `spy_recall` 0.95, `spy_scoring: out_of_fold`, `n_folds` 5, seed 20261102.
+
+| | morgan_centre | morgan |
+|---|---|---|
+| spies | 2,279 | 2,279 |
+| realised spy recall | 0.9504 | 0.9504 |
+| threshold, out of fold | 0.0429 | 0.0426 |
+| threshold, in sample | 0.0451 | 0.0449 |
+| reliable negatives, out of fold | 15,250 | 14,031 |
+| reliable negatives, in sample | 16,952 | 19,646 |
+| share of U rows / of draws | 0.1492 / 0.1464 | 0.1373 / 0.1355 |
+| marginal TV, acid / amine | 0.3405 / 0.3855 | 0.3754 / 0.3717 |
+| mean heavy atoms, reliable / all U | 33.78 / 32.36 | 36.61 / 32.36 |
+| single-partner share, reliable / all U | 0.3559 / 0.0000 | 0.3629 / 0.0000 |
+
+Inventory grid, mean heavy atoms per pair, 284,600 pairs: 23.73 (validation 2,615 pairs: 38.66). Re-counted
+today, `uv run python scratch/count_s2b_inputs.py ~/University/Phd/Dataset/Datasets`, output in
+`scratch/count_s2b_inputs.out.txt`, count 3.
+
+Spy-sweep share for this block at `spy_fraction` 0.20, tolerance 0.05, out of fold, mean of two seeds:
+0.1455 (0.148268 at seed 20261030, 0.142818 at seed 20261031). Command, run 2026-10-30 on the cluster:
+`bash scratch/run_spy_fractions.sh ~/University/Phd/Dataset/Datasets 4`; read from
+`scratch/private/cluster/spy_sweep_full_f0.20_morgan_centre.csv`, column `rn_share_pairs`. The Mac run of the
+same day, `scratch/private/spy_sweep_full_morgan_centre.csv`, gives 0.1455 for the same cell.
+
+**Interpretation.**
+1. The mechanism does what it was designed to do. Realised recall is 0.9504 against a configured 0.95: never
+   below, barely above, which is the written tie rule (recorded in ADR 029). The out-of-fold share, 0.1492,
+   is close to the 0.1455 the sweep of 2026-10-30 gave for this block at this fraction and tolerance. Two
+   independent runs (cluster and Mac) agreed on that cell before the stage reproduced it, so the stage
+   reproduces the instrument it was built from.
+2. The cost of PAYN's in-sample choice is now a number, and on `morgan` it is large. ADR 016 item 1
+   deviated from PAYN by scoring the spies out of fold and said the difference would be measured. In sample
+   would call 19,646 rows reliably negative against 14,031 out of fold, 40 % more, same data, same threshold
+   rule. On `morgan_centre` it is 16,952 against 15,250, about 11 %. ADR 016 can be cited with a figure.
+3. The reliable negatives are not a random slice of U, in two ways that bear on the plate. The marginal
+   distance from U is 0.34 to 0.39 on a scale where 0 is no shift, so the threshold undid much of stage U's
+   matching. The design predicted this; now it is quantified. Second, the selected rows are larger (33.78
+   heavy atoms against U's 32.36, and 36.61 on `morgan`, +4.3 there), while the inventory grid the plate is
+   picked from averages 23.73. And they are thin: no substrate in all of U appears in exactly one pair,
+   while 36 % of the selected set's substrates do. So the final model's negative class is systematically
+   bigger and sparser than the pool it came from and the grid it will score. That is the strongest argument
+   so far for the naive arm of ADR 016 item 2 being a serious candidate and not a courtesy: it never
+   touches the reliable negatives, so it inherits neither bias.
+
+**Next.** Stage S2b is unblocked, since the table exists: four runs, two arms on two blocks (ADR 028), tests
+first. ADR 028's input list does not yet say that the S2a table carries the `weight` column (ADR 029), so
+the spy arm reads its training weights from it and never joins back to U. It should say so.
+
+Still open, and mine to decide: the 1,587 inventory pairs in U that steer the plate away from 0.56 % of the
+grid; the feature table's licence gap; and whether stage S1's `config_sha256` moves from the file hash to
+the value hash, so the column means one thing.
+
+## 2026-11-02 — I ignored `n_draws` when I wrote `score/pu.py` on 2026-10-30, and fixed it (the day's third entry)
+
+**Context.** Stage U writes one row per distinct pair and carries the repeats in `n_draws`. The spy step I
+wrote on 2026-10-30 did not read that column. I found it today while writing the S2b design.
+
+**Done.** Counted the table, listed where the code treats the draw as the unit, and made every S2 fit
+weighted (ADR 029). Wrote ADR 028 (S2b config and its two arms) and the S2b subsection of
+`docs/design/modeling.md` the same day.
+
+Five places say the draw is the unit: `positives/unlabeled.py:151`; the stage U gate,
+`scripts/unlabeled_literature.py:67` and `:71`; `scripts/counts/count_u_probes.py:88`;
+`scratch/count_spy_threshold.py:111, 130, 140, 181` (so ADR 026 and the entries of today rest on a weighted
+fit); and the P:U ratio 1:9.7, which is by draws.
+
+**Result.** Command, run 2026-11-02:
+
+    uv run python -c "import pandas as pd; u = pd.read_parquet('~/University/Phd/Dataset/Datasets/derived/unlabeled/amide_coupling/unlabeled_literature_k10.parquet', columns=['n_draws']); p = pd.read_parquet('~/University/Phd/Dataset/Datasets/derived/positives/amide_coupling/positives.parquet', columns=['family']); print(len(u), u['n_draws'].sum(), (u['n_draws'] > 1).sum(), u['n_draws'].max(), (p['family'] == 'all').sum())"
+
+| quantity | value |
+|---|---|
+| rows | 102,200 |
+| draws | 110,585 |
+| rows with `n_draws` above 1 | 5,735 |
+| largest `n_draws` | 58 |
+| positives at the class width | 11,396 |
+
+Fixture test, `uv run pytest tests/test_score_pu.py -q` (hand-built, every P-like pair shares one vector):
+
+| | P-like spy score | reliable-negative share, rows | by draws |
+|---|---|---|---|
+| all weights 1 | 0.6394 | 0.500 | 0.500 |
+| one P-like U pair at `n_draws` 50 | 0.3769 | 0.500 | 0.145 |
+
+`uv run pytest -q`: 609 passed, 1 skipped. `uv run ruff check .` and `uv run mypy src` clean.
+
+Rank-AUC of the U draws against P's marginal, weighted and not. Command, run 2026-11-02 (output in
+`scratch/count_s2b_inputs.out.txt`; it loads the gate's own `rank_auc` from `scripts/unlabeled_literature.py`):
+
+    uv run python scratch/count_s2b_inputs.py ~/University/Phd/Dataset/Datasets
+
+| role | weighted by `n_draws` | gate certified | unweighted rows | drift |
+|---|---|---|---|---|
+| acid | 0.5049 | 0.5049 | 0.5211 | 0.0211 |
+| amine | 0.5095 | 0.5095 | 0.5332 | 0.0332 |
+
+A second, independent computation agreed to within 0.0003 (weighted 0.5052 and 0.5094; unweighted 0.5211
+and 0.5332).
+
+**Interpretation.**
+- The unweighted code would have fitted a U the gate never certified. The gate measures its rank-AUC on the
+  draw-expanded table, so its 0.5049 (acids) and 0.5095 (amines) certify the marginal of the draws. An
+  unweighted fit sees the marginal of the rows, which the gate never measured, so the certificate does not
+  transfer to the data the model would have been given. Measured afterwards, same day (command below), the
+  row marginal drifts from 0.5 by more than the gate allows.
+- The drift is a property of the row marginal, not of the fit. `gate_rank_auc_tolerance` is 0.02
+  (`configs/models/unlabeled_literature_k10.yml`), so U as an unweighted fit would have seen it is U that
+  `scripts/unlabeled_literature.py:125` refuses to write.
+- No S2a run existed, so no reported number is wrong. The unweighted code would not have reproduced the
+  spy-sweep measurement.
+- Open: `score/pu_audit.selection_shift` still counts over rows (ADR 029, Consequences).
+
+**Next.** Write `scripts/score_pu.py` and run S2a once. Then `score/pu_scores.py` for S2b (ADR 028). The
+inventory-in-P counts of 2026-10-22 were re-run the same day with the command above; the new figures, and
+the 1 validation pair and 1,587 inventory pairs found in U, are in `docs/design/modeling.md`, S2b.
+
+---
+
+## 2026-11-02 — A classifier trained on the question itself separates the 1,121 negatives; my reading of 2026-10-30 was wrong (the day's second entry)
+
+**Context.** The entry below this one shows the P-against-U model cannot tell the 1,121 known negatives from
+positives (AUC 0.46 to 0.48). On 2026-10-30 I read that as "the features carry no yield information". Today I
+asked what a plain classifier trained on the question itself would do.
+
+**Done.** Fitted positive against negative: 11,396 reported positives, 1,121 reported negatives,
+`HistGradientBoostingClassifier(max_iter=200, early_stopping=False)`, 5 folds, both blocks, seeds 20261102 and
+20261103. Only 333 of the 1,121 negative pairs have both substrates in stage F, so I featurised the other 792
+substrates in the script, as `scratch/count_spy_threshold.py` does.
+
+Command:
+
+    uv run python scratch/count_pos_vs_neg.py ~/University/Phd/Dataset/Datasets <block> <seed>
+
+**Result.** ROC-AUC, positive against negative:
+
+| block | protocol | seed 20261102 | seed 20261103 |
+|---|---|---|---|
+| morgan | acid-grouped (Setting 3) | 0.7006 | 0.7077 |
+| morgan | both sides unseen (Setting 4) | 0.6846 | 0.6872 |
+| morgan_centre | acid-grouped | 0.6354 | 0.6121 |
+| morgan_centre | both sides unseen | 0.5967 | 0.5684 |
+
+Controls (same command): permuted labels mean 0.508 (null standard error about 0.009); summed heavy atoms
+alone 0.4760.
+
+**Interpretation.**
+- My 2026-10-30 reading was wrong. It showed that a model trained on a different question cannot see the
+  information. It did not show the information is absent.
+- Caveat I cannot remove: a low-yield entry sits in the same scope table as its neighbours, and Setting 4
+  removes shared substrates, not shared papers. Part of the margin may be "I recognise this scope table".
+- Decision, mine, 2026-11-02, before any validation read: keep the pre-registered plan. The spy technique
+  and `morgan_centre` stay primary; the negatives stay an instrument. I rejected switching to `morgan` (better
+  by about 0.10 here, but the larger literature-against-lab shortcut, 0.859 and 0.879) and rejected training
+  on the negatives. The finding goes into the paper as a result about the method.
+- `configs/models/pu_spy_morgan_centre.yml` and `configs/models/pu_spy_morgan.yml` now exist, with
+  `spy_fraction: 0.20`. The entry below says they do not; that was true when it was written. I fixed the value
+  later today, after that entry. The reason: the measurement cannot choose the fraction, because the lift is far
+  below 1 at every value (0.26 to 0.36 on morgan_centre) and the differences are at or near the seed spread.
+  What does discriminate is the threshold's footing: 114 spies at 0.01, so the 95 % cut rests on about five
+  rows, against 2,279 at 0.20, where it rests on about 114. The cost is nil, because stage S2b fits the final
+  model on all of P; a larger fraction only thins the positives the spy classifier sees, leaving 9,117. So
+  0.20, for that reason and not because PAYN used it.
+- Reasons and the narrowing of ADR 024 item 1 and ADR 026 item 2: `docs/decisions/027-what-the-literature-negatives-can-and-cannot-measure.md`.
+
+**Next.**
+- `scratch/count_pos_vs_neg.py` is git-ignored. Whether it joins the published count scripts is open (ADR 011).
+- A sentence on the scope-table confound for the paper's limitations.
+- Whether a yield-aware objective is worth designing. Not decided.
+- The validation read, naive arm beside the spy arm.
+
+---
+
+## 2026-11-02 — I kept the spy technique as the primary method before any validation read; the spy-fraction measurement is done and the check is weaker than ADR 026 says
+
+**Context.** Two dates. The measurements below were run on **2026-10-30** (the cluster sweep between 18:09 and
+18:32, the Mac run of the quartile file at 15:48). Only the choice of the method order was made on
+**2026-11-02**, and that is what this entry's date stands for. The sweep is not today's work. ADR 026 item 5 owed a measurement of `spy_fraction` at our real P:U ratio, about 1:9.7. The
+Chemlex validation read has not happened yet. Before it does, I had to settle one thing, because it cannot be
+settled honestly afterwards.
+
+**Done.**
+- **Choice of the primary method, made today, before any Chemlex read.** I was offered two options. A: keep
+  the spy technique as the primary method, as ADR 014 item 1 says. B: write an ADR superseding ADR 014 item 1,
+  so that the naive P-against-U ranking could become the headline. I chose **A**.
+- (Run on 2026-10-30.) Ran the spy-fraction measurement on the group cluster (reaction.uni-muenster.de, 32 cores, `OMP_NUM_THREADS=4`).
+- Added `scratch/run_spy_fractions.sh`. It takes the Datasets root as an argument and refuses to run without
+  it. That is the fix ADR 021 made for the published count scripts. `scratch/private/run_spy_all.sh` never got
+  it: it hard-codes a Mac path and so runs only on the Mac.
+- Added the mode `sweep_full_f<fraction>` to `scratch/count_spy_threshold.py`. The existing `sweep_full` mode is
+  untouched, so every number already recorded from it still reproduces.
+
+Command (eight processes: two blocks x four fractions, both seeds, both scorings; 28.5 minutes wall clock):
+
+    bash scratch/run_spy_fractions.sh ~/University/Phd/Dataset/Datasets 4
+
+**Result.**
+
+*(a) The choice.* It was made before the validation read. That is the only thing that separates it from
+choosing a headline on the strength of a result (ADR 008 item 6). So the spy technique stays primary. The naive
+control of ADR 016 item 2 runs beside it. If the naive arm wins, I report it as "the choice of PU method changed
+the answer by X", not as a substitution. ADR 014 item 1 stays as written; no superseding ADR is needed.
+
+*(b) Lift* (share of the 1,121 known literature negatives caught, divided by the share of U called reliably
+negative), tolerance 0.05, out of fold, seeds 20261030 / 20261031:
+
+| block | f=0.01 | f=0.05 | f=0.10 | f=0.20 |
+|---|---|---|---|---|
+| morgan_centre | 0.364 / 0.330 | 0.277 / 0.299 | 0.316 / 0.348 | 0.259 / 0.275 |
+| morgan | 0.296 / 0.236 | 0.182 / 0.228 | 0.164 / 0.217 | 0.221 / 0.288 |
+
+Command: the one above.
+
+| | value |
+|---|---|
+| seed-to-seed spread per cell, morgan_centre | 0.016 to 0.034 |
+| seed-to-seed spread per cell, morgan | 0.046 to 0.067 |
+| spies at f=0.01 | 114 |
+| spies at f=0.20 | 2,279 |
+
+Reliable-negative pairs, tolerance 0.05, out of fold, mean over the two seeds and both blocks (four rows per fraction):
+
+| f | reliable-negative pairs |
+|---|---|
+| 0.01 | 20,071 |
+| 0.05 | 19,123 |
+| 0.10 | 17,798 |
+| 0.20 | 14,190 |
+
+Command: the one above. At f=0.01 the 95 % threshold rests on about five rows (5 % of 114).
+
+*(c) Out-of-fold score quartiles, morgan_centre* (25 % / median / 75 %). These are from the **Mac run of
+2026-10-30**, not the cluster run: `scratch/private/spy_sweep_full_morgan_centre.csv`, the row with
+`seed == 20261030` and `scoring == "oof"`, columns `q_u`, `q_spy`, `q_neg` (a property of the fit, so they repeat
+across the three tolerances in that file).
+
+| set | quartiles |
+|---|---|
+| U | 0.054 / 0.070 / 0.081 |
+| spies | 0.069 / 0.081 / 0.106 |
+| the 1,121 known negatives | 0.069 / 0.081 / 0.114 |
+
+Command for the quartiles (the Mac-only runner that `run_spy_fractions.sh` replaces):
+
+    bash scratch/private/run_spy_all.sh
+
+which for this file runs:
+
+    uv run python scratch/count_spy_threshold.py ~/University/Phd/Dataset/Datasets morgan_centre sweep_full 20261030 20261031
+
+`auc_n_vs_ptrain` (known negatives against training positives), out of fold, over all rows of the eight
+`sweep_full_f*` CSVs of the cluster run: 0.4596 to 0.4802. Command: `bash scratch/run_spy_fractions.sh
+~/University/Phd/Dataset/Datasets 4`, as above.
+
+**Interpretation.**
+- Every lift is far below 1. No fraction rescues the step.
+- f=0.01 is highest on morgan_centre, 0.08 above f=0.20, against a seed spread of 0.03. On morgan there is no
+  consistent order. Two seeds is thin. Every lift is far below 1, and the differences between fractions are at or near the
+  seed-to-seed spread, except f=0.01 on morgan_centre. My own reading of what to do with `spy_fraction` is still owed.
+- **This corrects how I read the lift on 2026-10-30.** I reported 0.27 as "three to four times worse than
+  drawing negatives at random" and stopped. The arithmetic was right and the reading was incomplete. The known
+  negatives are scored like hidden positives (their quartiles match the spies', not U's), and the model cannot
+  tell a reported failure from a reported success (AUC 0.46 to 0.48). The low lift follows from the known
+  negatives *being* published chemistry. The check cannot tell "the threshold cut the wrong subspace" from "the
+  negatives look like positives".
+- So the check of ADR 024 role 2 and ADR 026 item 2 is weaker than ADR 026 states. ADR 026 item 2 calls it "the
+  only available check". It is available, but it does not discriminate. A superseding record is owed. It is not
+  written: the interpretation, and what replaces the check, are mine to give.
+- What the data does not show: that the spy step is wrong, or that it is right.
+
+**Next.**
+- Write the superseding ADR for ADR 024 role 2 and ADR 026 item 2 once I have settled my reading. [owed]
+- `spy_fraction` is not frozen, so no `configs/models/pu_*.yml` exists yet.
+- The cluster now holds a copy of `derived/` including `private/` (612 MB, `drwx------`, no Chemlex test
+  split). Whether it stays is undecided.
+- Run the validation read, with the naive arm beside the spy arm, as in (a).
+
+---
+
 ## 2026-10-30 — The literature gave no value for `spy_fraction`; it said the spy step is a heuristic (the day's fourth entry)
 
 **Context.** This is the fourth entry of today. Before choosing `spy_fraction` I asked for the literature on
@@ -541,6 +969,15 @@ then `uv run python scripts/counts/count_baseline_aucs.py ~/University/Phd/Datas
 | B8 (new, at family width) | 0.7247 | not comparable |
 
 B8 had been quoted in accepted records at 0.7115 as the bar S2 must clear. `grep` found it in no source file.
+
+Correction, written later the same day before anything was committed: that grep proved nothing, and the
+conclusion I drew from it was wrong. 0.7115 does have a source — ADR 015 item 1 measured it from the
+production path, `nearest_pair_scores` on `morgan_centre`, together with 0.6317 for B2 — and a measured
+output is of course not a literal in `src/`. The right word is **superseded**, not unsourced: 0.7115 and
+0.6317 are the pre-cut-off pair, 0.7221 and 0.632 are the same two after the rebuild. I have corrected
+ADR 031 and ADR 030 and `modeling.md` to say so before they were committed. The lesson I actually earned
+here is narrower than the one I wrote down: searching the code for a number only tells you whether someone
+hard-coded it, never whether a command produced it.
 
 I first wrote 0.7221 down as 0.7226. I caught it by re-running the published command before committing, which is the second transcription error of the day and the argument for publishing the command next to every number.
 
