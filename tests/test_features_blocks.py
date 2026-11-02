@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from platepu.features.blocks import MODEL_DESCRIPTORS, block_matrix
+from platepu.features.blocks import FINGERPRINT_BLOCKS, MODEL_DESCRIPTORS, block_matrix
 from platepu.features.substrate import DESCRIPTORS
 
 NINE = (
@@ -145,3 +145,34 @@ def test_block_matrix_does_not_binarise() -> None:
     assert matrix.max() == 3.0
     assert matrix[0, 5] == 3.0
     assert matrix[2, 2] == 2.0
+
+
+def _near_table() -> pd.DataFrame:
+    """Two substrates with a full-width (2,048) morgan_near column, as stage F writes it."""
+    first, second = np.zeros(2048, dtype=np.uint8), np.zeros(2048, dtype=np.uint8)
+    first[5], first[2047] = 1, 3
+    second[0] = 2
+    return pd.DataFrame({"key_stereo": ["k1", "k2"], "morgan_near": [first, second]})
+
+
+def test_block_matrix_of_morgan_near_is_float64_and_full_width() -> None:
+    matrix = block_matrix(_near_table(), "morgan_near")
+    assert matrix.shape == (2, 2048)
+    assert matrix.dtype == np.float64
+    assert (matrix[0, 5], matrix[0, 2047], matrix[1, 0]) == (
+        1.0,
+        3.0,
+        2.0,
+    )  # counts, not bits
+
+
+def test_unknown_block_error_lists_morgan_near_among_the_known() -> None:
+    with pytest.raises(ValueError, match="known blocks:.*'morgan_near'"):
+        block_matrix(_near_table(), "morgan_ecfp")
+
+
+def test_morgan_near_is_a_fingerprint_block_and_its_name_carries_no_distance() -> None:
+    """The distance is chosen per class and lives in configs/features.yml (ADR 030); a column named
+    for one value (morgan_d6) would lie for a class that picks another."""
+    assert "morgan_near" in FINGERPRINT_BLOCKS
+    assert not any(any(ch.isdigit() for ch in name) for name in FINGERPRINT_BLOCKS)

@@ -6,6 +6,7 @@ counted from R, atoms of G are never counted). The tautomer pair has one InChIKe
 """
 
 from dataclasses import replace
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,8 @@ from rdkit.Chem import rdFingerprintGenerator
 from platepu.classify.engine import load_class
 from platepu.features.substrate import (
     DESCRIPTORS,
+    MAX_COUNT,
+    _morgan,
     load_feature_config,
     substrate_features,
     substrate_table,
@@ -73,6 +76,7 @@ def test_unparsable_electron_withdrawing_smarts_stops_loading(tmp_path: Path) ->
     path.write_text(
         "morgan: {radius: 2, n_bits: 2048}\n"
         "morgan_centre: {radius: 2, n_bits: 2048}\n"
+        "morgan_near: {radius: 2, n_bits: 2048, distance: 6}\n"
         "electron_withdrawing:\n"
         '  - {name: nitrile, smarts: "[CX2#N"}\n',
         encoding="utf-8",
@@ -688,6 +692,7 @@ def plain(table: pd.DataFrame) -> pd.DataFrame:
     return table.assign(
         morgan=table["morgan"].map(lambda counts: counts.tolist()),
         morgan_centre=table["morgan_centre"].map(lambda counts: counts.tolist()),
+        morgan_near=table["morgan_near"].map(lambda counts: counts.tolist()),
     )
 
 
@@ -726,5 +731,202 @@ def test_table_columns() -> None:
         "subclass",
         "morgan",
         "morgan_centre",
+        "morgan_near",
         *DESCRIPTORS,
     }
+
+
+# --- morgan_near: the Morgan environments rooted on every atom within `distance` bonds of R --------
+# ADR 030 (2026-11-02). The column name carries no number on purpose: the distance is chosen per
+# reaction class by a label-free rule (d = 6 for amide coupling) and lives in configs/features.yml,
+# so a name like `morgan_d6` would lie for a class that selects d = 3. `distance: 0` is the
+# morgan_centre block. Expected values were checked with RDKit on 2026-11-02 (radius 2, 2,048 bits);
+# that fromAtoms=[every atom] equals the unrestricted call was checked on ten molecules the same day.
+ETHYLAMINE = "CCN"
+FAR = 100  # larger than the diameter of every molecule below
+NEAR_FIXTURES = (
+    (FORMIC_ACID, "acid"),
+    (ACETIC_ACID, "acid"),
+    (PIVALIC_ACID, "acid"),
+    (BENZOIC_ACID, "acid"),
+    (BOC_PROLINE, "acid"),
+    (L_ALANINE, "acid"),
+    (HEXANOIC_ACID, "acid"),
+    (TERT_BUTYLAMINE, "amine"),
+    (MORPHOLINE, "amine"),
+    (ANILINE, "amine"),
+    (BENZYLAMINE, "amine"),
+    (AMINOPYRIDINE, "amine"),
+    (CHLOROANILINE, "amine"),
+    (ETHYLAMINE, "amine"),
+)
+NEAR_YAML = (
+    "morgan: {radius: 2, n_bits: 2048}\n"
+    "morgan_centre: {radius: 2, n_bits: 2048}\n"
+    "morgan_near: {%s}\n"
+    "electron_withdrawing:\n"
+    '  - {name: nitrile, smarts: "[CX2]#N"}\n'
+)
+
+
+def near(smiles: str, role: str, distance: int) -> np.ndarray:
+    """The morgan_near vector of one substrate at the given distance."""
+    config = replace(CONFIG, near_distance=distance)
+    return substrate_features(smiles, role, RULE, config)["morgan_near"]  # type: ignore[return-value]
+
+
+def test_feature_config_reads_the_near_block() -> None:
+    """configs/features.yml, morgan_near: radius 2, 2,048 bits, distance 6 (ADR 030, amide coupling)."""
+    assert (CONFIG.near_radius, CONFIG.near_bits, CONFIG.near_distance) == (2, 2048, 6)
+
+
+def test_near_vector_is_a_uint8_array_of_the_configured_width() -> None:
+    vector = substrate_features(ANILINE, "amine", RULE, CONFIG)["morgan_near"]
+    assert isinstance(vector, np.ndarray)
+    assert vector.dtype == np.uint8
+    assert vector.shape == (2048,)
+
+
+@pytest.mark.parametrize(("smiles", "role"), NEAR_FIXTURES)
+def test_near_at_distance_zero_equals_morgan_centre(smiles: str, role: str) -> None:
+    """The boundary of the ladder: the only root is R, which is how morgan_centre is built."""
+    centre = substrate_features(smiles, role, RULE, CONFIG)["morgan_centre"]
+    assert near(smiles, role, 0).tolist() == centre.tolist()  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(("smiles", "role"), NEAR_FIXTURES)
+def test_near_beyond_the_diameter_equals_the_whole_molecule_fingerprint(
+    smiles: str, role: str
+) -> None:
+    """With every atom a root the count is the whole-molecule one, redundant-environment rule
+    included (RDKit's fromAtoms=[all atoms] and the unrestricted call agree, checked 2026-11-02)."""
+    whole = substrate_features(smiles, role, RULE, CONFIG)["morgan"]
+    assert near(smiles, role, FAR).tolist() == whole.tolist()  # type: ignore[attr-defined]
+
+
+def test_ethylamine_grows_with_the_distance_atom_by_atom() -> None:
+    """CCN, atoms CH3 (0), CH2 (1), N (2); R = N. Distance from R: N 0, CH2 1, CH3 2.
+    d = 0, roots {N}: N at radius 0, 1, 2 gives 3 bits. d = 1, roots {N, CH2}: CH2 adds radius 0
+    and 1 (two new bits); N's radius-2 environment (all three atoms) is now contained in CH2's
+    and RDKit drops it, so 3 + 2 - 1 = 4 bits. d = 2, roots {N, CH2, CH3}: CH3 adds its radius 0
+    and 1 and the whole-molecule environments, 6 bits, the whole-molecule count. Bits 3, 4, 6
+    (RDKit, 2026-11-02): the number of set bits grows with the distance."""
+    sizes = [int(np.count_nonzero(near(ETHYLAMINE, "amine", d))) for d in (0, 1, 2)]
+    assert sizes == [3, 4, 6]
+    assert sizes[0] <= sizes[1] <= sizes[2] and sizes[0] < sizes[2]
+
+
+def test_near_loses_the_radius_two_bit_of_a_terminal_centre_at_the_first_step() -> None:
+    """FINDING (2026-11-02): containment fails exactly at d = 0 -> 1, because RDKit drops an
+    environment whose bonds lie inside another recorded environment, and the neighbour that becomes
+    a root at d = 1 swallows the radius-2 environment of R (ethylamine: bit 317 is set at d = 0 and
+    gone at d = 1). It is the effect features.yml describes for morgan_centre. Exactly one bit is
+    lost, and it is the d = 0 bit for R's own radius-2 environment."""
+    at_zero = set(np.flatnonzero(near(ETHYLAMINE, "amine", 0)).tolist())
+    at_one = set(np.flatnonzero(near(ETHYLAMINE, "amine", 1)).tolist())
+    assert len(at_zero - at_one) == 1
+    assert len(at_zero & at_one) == 2
+
+
+@pytest.mark.parametrize(("smiles", "role"), NEAR_FIXTURES)
+def test_near_only_gains_bits_and_counts_from_distance_one_on(
+    smiles: str, role: str
+) -> None:
+    """Monotone containment for d1 < d2 with d1 >= 1: a root set that grows cannot lose an
+    environment, so every bit set at d1 is set at d2 with a count that is no smaller. d1 = 0 is
+    excluded on purpose, see the test above (7 of the 14 fixtures lose the bit, checked 2026-11-02)."""
+    ladder = [near(smiles, role, d).astype(int) for d in (1, 2, 3, 4, 6, 8, FAR)]
+    for smaller, larger in pairwise(ladder):
+        assert (smaller <= larger).all()
+
+
+def test_near_counts_use_the_same_uint8_guard_as_the_other_blocks() -> None:
+    """The ceiling stays 255 and the dtype uint8 (roots at a finite d are a subset of all atoms, so
+    no count exceeds the whole-molecule one, which fits). A C300 chain still fails loudly when the
+    distance reaches all of it; the dtype is not widened to make it pass.
+
+    LIMITATION: this does not prove the near path has its own guard. `substrate_features` computes
+    `morgan` first and that call raises on the same chain, so the test passes whether or not the
+    near computation checks its counts. The public API cannot isolate it; do not read this test as
+    evidence that the guard exists on the near path."""
+    assert MAX_COUNT == 255
+    with pytest.raises(ValueError, match="does not fit uint8"):
+        near("C" * 300 + "C(=O)O", "acid", 400)
+
+
+def test_near_distinct_vectors_never_fall_as_the_distance_grows() -> None:
+    """ADR 030's rule counts the share of uniquely resolved substrates per d; that only makes sense
+    if the number of distinct count vectors is non-decreasing in d. Seven amines: the three
+    n-alkylamines and the two para-substituted anilines are told apart only far from N."""
+    amines = [
+        "CCN",
+        "CCCN",
+        "CCCCN",
+        ANILINE,
+        BENZYLAMINE,
+        CHLOROANILINE,
+        METHYLANILINE,
+    ]
+    distinct = [
+        len({near(smiles, "amine", d).tobytes() for smiles in amines})
+        for d in (0, 1, 2, 3, 4, 5, 6, FAR)
+    ]
+    assert distinct == sorted(distinct)
+    assert distinct[0] < distinct[-1]
+    assert distinct[-1] == len(amines)
+
+
+@pytest.mark.parametrize("distance", [0, 3, 6])
+def test_near_config_accepts_a_non_negative_integer_distance(
+    tmp_path: Path, distance: int
+) -> None:
+    path = tmp_path / "features.yml"
+    path.write_text(
+        NEAR_YAML % f"radius: 2, n_bits: 2048, distance: {distance}", encoding="utf-8"
+    )
+    assert load_feature_config(path).near_distance == distance
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "radius: 2, n_bits: 2048",
+        "radius: 2, n_bits: 2048, distance: -1",
+        "radius: 2, n_bits: 2048, distance: 2.5",
+        "radius: 2, n_bits: 2048, distance: far",
+    ],
+    ids=["missing", "negative", "fractional", "word"],
+)
+def test_near_config_with_a_bad_distance_names_the_file(
+    tmp_path: Path, entry: str
+) -> None:
+    path = tmp_path / "features.yml"
+    path.write_text(NEAR_YAML % entry, encoding="utf-8")
+    with pytest.raises(ValueError, match="features.yml"):
+        load_feature_config(path)
+
+
+def test_table_carries_the_near_column_and_it_matches_the_substrate_features() -> None:
+    table = build([positives_row("A1", ACETIC_ACID, "N1", ANILINE)], [], [])
+    expected = substrate_features(ANILINE, "amine", RULE, CONFIG)["morgan_near"]
+    row = table.loc[table["key_stereo"] == "N1", "morgan_near"].iloc[0]
+    assert row.tolist() == expected.tolist()  # type: ignore[attr-defined]
+
+
+def test_morgan_refuses_an_empty_list_of_roots() -> None:
+    """``_morgan`` is private and this case is unreachable through the public API (``_within``
+    always contains the reaction centre); it is pinned so that it stays unreachable.
+
+    RDKit reads ``fromAtoms=[]`` as the whole molecule: on ethylamine the rooted and the unrooted
+    count fingerprints are equal bit for bit (verified 2026-11-02). So ``roots=[]`` would quietly
+    return ``morgan`` where the docstring promises the environments centred on those atoms.
+    The first assert shows RDKit's behaviour, so a future RDKit that changes it is noticed here.
+    """
+    mol = Chem.MolFromSmiles(ETHYLAMINE)
+    generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+    assert (
+        generator.GetCountFingerprintAsNumPy(mol, fromAtoms=[]).tolist()
+        == generator.GetCountFingerprintAsNumPy(mol).tolist()
+    )
+    with pytest.raises(ValueError, match="roots"):
+        _morgan(mol, ETHYLAMINE, 2, 2048, roots=[])

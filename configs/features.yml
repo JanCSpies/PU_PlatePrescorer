@@ -18,6 +18,20 @@ morgan_centre:
   radius: 2
   n_bits: 2048
 
+# The same fingerprint rooted on EVERY atom within `distance` bonds of the reacting atom, so
+# `morgan_centre` is this block at distance 0 and a distance past the molecule's diameter is
+# `morgan`. The distance is chosen per reaction class by the label-free rule of ADR 030: the
+# smallest distance whose share of uniquely-resolved pairs on the set to be scored is within 5
+# points of the best achievable. For amide coupling that is 6 (89.1 % against a best of 91.0 %),
+# where distance 0 resolves only 2.0 % of the 284,600 laboratory candidate pairs and left the first
+# stage S2b run unable to rank a plate: its top 96 pairs shared one score with 1,300 others.
+# The column name carries no number on purpose -- another class may select 3, and `morgan_d6` would
+# then lie. The distance is hashed into every run instead.
+morgan_near:
+  radius: 2
+  n_bits: 2048
+  distance: 6
+
 # Substituents counted on the aromatic ring system of the reacting atom (`n_ewg_on_ring`). They
 # lower the nucleophilicity of an aniline: Hammett rho is -2.1 in water and -2.5 in MeCN against
 # benzhydrylium ions (Brotzel, Chu & Mayr, J. Org. Chem. 2007, 72, 3679). Which groups withdraw

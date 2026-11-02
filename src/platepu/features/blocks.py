@@ -38,7 +38,9 @@ MODEL_DESCRIPTORS = (
 )
 SIZE = "n_heavy_atoms"
 # Columns holding one fixed-size count vector per substrate (stage F writes uint8, 2,048 wide).
-FINGERPRINT_BLOCKS = ("morgan", "morgan_centre")
+# `morgan_near` is rooted on every atom within the configured distance of the reacting atom;
+# the distance is per reaction class (ADR 030), which is why the name carries no number.
+FINGERPRINT_BLOCKS = ("morgan", "morgan_centre", "morgan_near")
 # Blocks assembled from scalar columns, in the order the matrix must carry them.
 COLUMN_BLOCKS: dict[str, tuple[str, ...]] = {
     "descriptors": MODEL_DESCRIPTORS,

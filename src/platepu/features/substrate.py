@@ -48,6 +48,14 @@ class FeatureConfig:
         morgan_bits: Fingerprint length (2,048).
         centre_radius: Radius of the fingerprint rooted at the reacting atom.
         centre_bits: Its length.
+        near_radius: Radius of the fingerprint rooted on every atom within ``near_distance`` bonds
+            of the reacting atom.
+        near_bits: Its length.
+        near_distance: How far from the reacting atom a root may sit. 0 is ``morgan_centre``, and a
+            distance past the molecule's diameter is ``morgan``. It is chosen **per reaction class**
+            by the label-free rule of ADR 030 -- amide coupling gets 6 -- which is why the column is
+            called ``morgan_near`` and carries no number: ``morgan_d6`` would lie for a class that
+            selects 3.
         electron_withdrawing: Patterns counted on the aromatic ring of the reacting atom, in file
             order. Which groups withdraw electrons does not depend on the reaction class, so they
             live here and not in the class YAML.
@@ -57,18 +65,43 @@ class FeatureConfig:
     morgan_bits: int
     centre_radius: int
     centre_bits: int
+    near_radius: int
+    near_bits: int
+    near_distance: int
     electron_withdrawing: tuple[Chem.Mol, ...]
 
 
 def load_feature_config(path: Path) -> FeatureConfig:
-    """Read ``configs/features.yml``; a SMARTS that does not parse raises ValueError."""
+    """Read ``configs/features.yml``; a missing key or a SMARTS that does not parse raises.
+
+    Raises:
+        ValueError: a block is missing, ``morgan_near``'s distance is absent, fractional, a word or
+            negative, or a SMARTS does not parse. The message names the file, because the caller
+            sees only a path.
+    """
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
-    morgan, centre = config["morgan"], config["morgan_centre"]
+    try:
+        morgan, centre, near = (
+            config["morgan"],
+            config["morgan_centre"],
+            config["morgan_near"],
+        )
+        distance = near["distance"]
+        if isinstance(distance, bool) or not isinstance(distance, int) or distance < 0:
+            raise ValueError(
+                f"morgan_near.distance must be a whole number of bonds, 0 or more, "
+                f"not {distance!r}"
+            )
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"{path} is not a features config: {error}") from error
     return FeatureConfig(
         morgan_radius=int(morgan["radius"]),
         morgan_bits=int(morgan["n_bits"]),
         centre_radius=int(centre["radius"]),
         centre_bits=int(centre["n_bits"]),
+        near_radius=int(near["radius"]),
+        near_bits=int(near["n_bits"]),
+        near_distance=distance,
         electron_withdrawing=tuple(
             parse_smarts(entry["smarts"]) for entry in config["electron_withdrawing"]
         ),
@@ -93,9 +126,26 @@ def substrate_features(
         "subclass": subclass_of(smiles, role, rule),
         "morgan": _morgan(mol, smiles, config.morgan_radius, config.morgan_bits),
         "morgan_centre": _morgan(
-            mol, smiles, config.centre_radius, config.centre_bits, root=centre
+            mol, smiles, config.centre_radius, config.centre_bits, roots=[centre]
+        ),
+        "morgan_near": _morgan(
+            mol,
+            smiles,
+            config.near_radius,
+            config.near_bits,
+            roots=_within(mol, centre, config.near_distance),
         ),
     }
+
+
+def _within(mol: Chem.Mol, centre: int, distance: int) -> list[int]:
+    """Every atom at most ``distance`` bonds from the reacting atom, the centre included.
+
+    The same distance matrix ``_descriptors`` already walks, so the mechanism is not new to this
+    module. At distance 0 this is ``[centre]``, which is exactly ``morgan_centre``.
+    """
+    bonds = Chem.GetDistanceMatrix(mol)[centre]
+    return [atom for atom in range(mol.GetNumAtoms()) if bonds[atom] <= distance]
 
 
 def substrate_table(
@@ -153,7 +203,7 @@ def substrate_table(
             substrate_features(smiles, role, rule, config)
             for smiles, role in zip(keys["smiles"], keys["role"], strict=True)
         ],
-        columns=[*DESCRIPTORS, "subclass", "morgan", "morgan_centre"],
+        columns=[*DESCRIPTORS, "subclass", "morgan", "morgan_centre", "morgan_near"],
     )
     table = pd.concat([keys, features], axis=1)
     table = table.astype(dict.fromkeys([*DESCRIPTORS, "n_smiles"], "int16"))
@@ -257,17 +307,40 @@ def _at_distance(distance: np.ndarray, atoms: Iterable[int], bonds: int) -> int:
 
 
 def _morgan(
-    mol: Chem.Mol, smiles: str, radius: int, bits: int, root: int | None = None
+    mol: Chem.Mol, smiles: str, radius: int, bits: int, roots: list[int] | None = None
 ) -> np.ndarray:
     """Morgan count fingerprint as uint8, without chirality (stereo stays in the key).
 
-    With ``root`` only the environments centred on that atom are counted, so the result carries at
-    most ``radius + 1`` bits and describes the reaction centre alone.
+    With ``roots`` only the environments centred on those atoms are counted: one root is the
+    reaction centre alone (``morgan_centre``, at most ``radius + 1`` bits), every atom within d
+    bonds is ``morgan_near``, and ``None`` is the whole molecule.
+
+    **The series is not nested at its first step**, which is worth knowing before anyone reasons
+    from it. RDKit drops an environment whose bond set lies inside another it has recorded, so the
+    radius-2 environment of a *terminal* reacting atom survives when it is the only root and is
+    swallowed once its neighbour becomes one: on ethylamine, bit 317 is set at distance 0 and gone
+    at distance 1 (measured on 7 of 14 fixtures, 2026-11-02;
+    ``tests/test_features.py::test_near_loses_the_radius_two_bit_of_a_terminal_centre_at_the_first_step``).
+    From distance 1 upward containment holds. ``configs/features.yml`` already records the same
+    quirk for ``morgan_centre``. Default RDKit is kept rather than
+    ``includeRedundantEnvironments=True``, which would restore nesting but break the bit-for-bit
+    match between a large distance and ``morgan`` -- and that match is what makes the whole distance
+    table comparable with every number measured under the two older columns (ADR 030).
     """
+    if roots is not None and not roots:
+        # RDKit reads an empty `fromAtoms` as the WHOLE molecule, verified bit for bit on ethylamine
+        # (2026-11-02), so an empty root set would silently return `morgan` and contradict every
+        # sentence above. Unreachable today -- `_within` always holds the centre, because its
+        # distance to itself is 0 and `load_feature_config` refuses a negative distance -- and
+        # refused rather than branched on, so it stays unreachable (§8).
+        raise ValueError(
+            "roots must not be empty: RDKit would read it as the whole molecule and return "
+            "`morgan` under another block's name"
+        )
     generator = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=bits)
     counts = (
-        generator.GetCountFingerprintAsNumPy(mol, fromAtoms=[root])
-        if root is not None
+        generator.GetCountFingerprintAsNumPy(mol, fromAtoms=roots)
+        if roots is not None
         else generator.GetCountFingerprintAsNumPy(mol)
     )
     if int(counts.max()) > MAX_COUNT:
