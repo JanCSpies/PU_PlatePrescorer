@@ -1,226 +1,203 @@
-# CLAUDE.md — Project charter & working agreement
+# CLAUDE.md — PU_PlatePrescorer
 
-> **Auto-loaded into every Claude Code session in this directory.** Keep it accurate and concise.
-> Fast-moving detail lives in `LAB_JOURNAL.md` and `docs/` — link, don't inline.
+> Loaded into every Claude Code session in this repo. Project rules only.
+> Personal preferences go in `~/.claude/CLAUDE.md`. Keep this file short, true, under 200 lines.
 
----
+## 1. Project
 
-## 1. What this project is
+**PU_PlatePrescorer** — Jan Christopher Spies and Luka Praprotnik Čurič, Glorius group,
+Organisch-Chemisches Institut, University of Münster. Target: a full paper in JACS or higher.
 
-**PU_PlatePrescorer** — a publication-track research project by **Jan Christopher Spies**
-(PhD student, Glorius group, Organisch-Chemisches Institut, University of Münster).
+**Thesis.** Positive-Unlabeled learning on **real literature reactions** plus a **virtual
+(enumerated) unlabeled substrate space** pre-scores an HTE substrate matrix well enough to **raise
+the plate hit rate** — including for reaction classes with **no existing HTE dataset**.
 
-**Target:** a full paper in **JACS or higher**.
+**Prior group work.** PAYN — *"Positivity is All You Need"*, J. Am. Chem. Soc. 2026, 148,
+15066–15075, doi:[10.1021/jacs.6c00127](https://doi.org/10.1021/jacs.6c00127), code
+<https://github.com/GloriusGroup/PAYN> — used **synthetic** P and U carved from HTE sets. TACIT —
+feasibility from positive-only data (under revision). This project uses real literature positives,
+a virtual U and real reporting bias, and validates **prospectively**.
 
-**Thesis (one sentence):** Positive-Unlabeled learning on **real literature reaction data**,
-combined with a **virtual (in-silico enumerated) unlabeled substrate space**, pre-scores an HTE
-substrate matrix well enough to **raise the plate hit rate** — including for reaction classes where
-**no HTE dataset exists**, which is where plate pre-scoring is actually needed.
+**Validation:** validation split → held-out public HTE test, touched once (Chemlex, HiTEA) →
+**prospective plate, model-picked vs random**, model and scores frozen and committed before any
+well is run.
 
-**Why it matters.** Exploratory HTE and especially **direct-to-biology (D2B)** campaigns spend plate
-capacity on wells that simply fail. A failed well costs the same as a successful one but yields no
-testable compound. If feasibility can be predicted *before* the plate is laid out — from literature
-alone, with no prior HTE data for that reaction class — then every campaign in that class starts
-from a better plate. In D2B, where crude reaction mixtures go straight into a biological assay,
-a higher synthetic hit rate converts directly into more real, assayable compounds per plate.
+## 2. Status and branches
 
-### Relation to prior group work (this is the novelty argument)
+- The AI-assisted prototype is archived as tag **`v0-prototype`** (commit `4dd8481`). Its results,
+  including the Chemlex 0.768 ROC-AUC, are **unverified targets** to reproduce or explain.
+- **Never copy code from `v0-prototype`.** Read it for ideas only:
+  `git worktree add ../PU_v0 v0-prototype`.
+- `main` = archived prototype line. **`luka/rebuild-clean-slate` = rebuild base** (PR #1). All
+  rebuild work stays on this branch, with no new branches, until it is merged; never on `main`.
+- **Commit only when Luka asks**, at the end of a piece of work, never automatically after each step.
+  Never push without asking.
+- Plan: `docs/design/rebuild.md`. **A stage is built only after that file describes it** (inputs,
+  outputs, tools, verification).
 
-- **PAYN** — *"Positivity is All You Need": Yield Prediction of Organic Reactions in Biased Data Sets
-  via Positive-Unlabeled Learning.* **J. Am. Chem. Soc. 2026, 148, 15066–15075.**
-  DOI [10.1021/jacs.6c00127](https://doi.org/10.1021/jacs.6c00127) ·
-  code <https://github.com/GloriusGroup/PAYN>
-- **TACIT** — reaction outcome/feasibility from positive-only data via implicit negatives
-  (under revision, *Nat. Mach. Intell.*).
+## 3. Commands
 
-PAYN established that PU learning recovers usable negatives from biased positive-heavy data — but
-its **P and U were synthetic**, carved out of existing HTE datasets by biased subsampling. That is a
-proof of principle under a controlled bias, not a demonstration that the method works on the bias
-chemistry actually has.
+    uv sync                     # install (Python 3.13; uv only, never bare pip)
+    uv run pytest               # tests
+    uv run ruff check . && uv run ruff format . && uv run mypy src && uv run pytest   # before every commit
 
-**This project's contribution is the step PAYN did not take:**
+Dev data (open, 2,000-row samples): `~/University/Phd/Dataset/Datasets/samples_2k/`. The Pistachio
+sample is licensed and lives apart in `samples_2k/private/`. Full corpora: cluster,
+`/mnt/datasets/`. Paths come from config or arguments, never hard-coded.
+Raw held-out sets (read-only): `~/University/Phd/Dataset/Datasets/raw/` (e.g. `raw/Chemlex/`).
+Outputs of a step: `~/University/Phd/Dataset/Datasets/derived/<step-name>/`, outside the repo.
 
-| | PAYN (JACS 2026) | **PU_PlatePrescorer (this work)** |
+## 4. Keep the repository clean
+
+The prototype became unreadable through leftover files. These rules prevent it.
+
+- **Only these are tracked:** `src/`, `tests/` (with small open fixtures in `tests/data/`),
+  `configs/`, `scripts/`, `docs/`, `pyproject.toml`, `uv.lock`, `.python-version`, `README.md`,
+  `CLAUDE.md`, `LAB_JOURNAL.md`, `LICENSE`, `.gitignore`. Anything else needs agreement first.
+- **Never commit** data (`*.csv`, `*.parquet`, `*.tsv`, `*.smi`), run outputs, images, logs,
+  notebooks, model files, caches, `.venv/`, `scratch/` or `private/`. Run outputs go outside the
+  repo or into a git-ignored folder.
+- **Experiments live in `scratch/`** (git-ignored). Code moves into `src/`
+  only when it is reused, tested and understood; then the scratch copy is deleted.
+- **No new top-level folder or file without agreement.** When one is added, update §10 in the same
+  commit.
+- **Stage files by name:** `git add path/to/file`. Never `git add .` or `git add -A`.
+- **Before every commit:** run `git status` and `git diff --staged`; every changed file must belong
+  to this task. Unrelated changes (formatting sweeps, renames) get their own commit.
+- **Delete, don't keep:** no `_old`, `_v2`, `_final`, `backup`, `test2` files, no commented-out
+  code. Git keeps the history.
+- **Focused commits** with prefixes: `feat`, `fix`, `test`, `docs`, `chore`, `refactor`; when
+  asked to commit, split the work into one-topic commits.
+
+## 5. Keep the code simple (no spaghetti)
+
+- **Stages talk through tables, not through each other.** Each stage reads one table and writes
+  one table. Imports go one way only: ingest → reactions → classify → standardise → positives /
+  benchmarks / library → features, with `io` below all. A module never imports from a later stage; no circular
+  imports.
+- **Separate I/O from chemistry.** Reading and writing files happens at the edges (adapters,
+  scripts). Chemistry functions take values and return values; they never open files or read
+  globals. That makes them testable.
+- **Plain functions and `@dataclass(frozen=True)` records first.** A class only when it holds
+  state used by several methods. No abstract base classes, registries, factories, plugin systems
+  or "generic" helpers until a third concrete case needs them.
+- **Small units:** functions about 40 lines, at most 5 parameters, nesting at most 3 levels;
+  modules under about 300 lines. Ruff enforces complexity (`max-complexity = 10`).
+- **No duplicated logic.** Chemistry logic (parsing, standardising, keys) exists in exactly one
+  function; everything else calls it.
+- **No hidden state:** no mutable module-level variables, no global config. Settings are passed in.
+- **Names say the chemistry:** `reactant_smiles`, `agent_smiles`, `product_mol`, `n_rejected` —
+  never `r`, `a`, `tmp`, `df2`. SMILES strings end in `_smiles`, RDKit molecules in `_mol`.
+- **Explicit over clever:** no metaprogramming, no deep inheritance, no comprehension that needs a
+  second read. If it is hard to explain, rewrite it.
+- **Errors never pass silently:** no bare `except`; catch the specific exception and record why
+  the row was rejected.
+- Full type hints; Google-style docstrings that say *why*. `logging` in `src/`, never `print`.
+- **Ask before adding a dependency.** Prefer RDKit, pandas, pyarrow and what `pyproject.toml`
+  already has; test a new library on our hard cases first. Agreed: rxnutils (ADR 001),
+  scikit-learn (ADR 006), openpyxl (the Chemlex workbook), pyyaml. Anything else is asked first.
+- Tables are pandas/pyarrow; data files Parquet, config YAML. No custom formats.
+
+## 6. Cheminformatics workflow
+
+- **Never trust a raw SMILES.** Every molecule goes parse → sanitise → standardise → canonicalise
+  through one function. `Chem.MolFromSmiles` returning `None` is a rejected row with a reason.
+  No `sanitize=False` without a written reason.
+- **Keep the raw next to the processed:** every row keeps source, source ID, licence and the
+  original string, so any result traces back to its record.
+- **Identity by key, not string:** molecules by canonical SMILES + InChIKey, reactions by a
+  canonical reaction key. Deduplicate across sources before counting anything.
+- **Every stage reports** rows in, rows out, rows rejected by reason, and saves the rejected rows.
+- **Look at the chemistry:** when a step changes molecules, save a grid image of about 20 changed
+  examples (before → after) for a human to check. Numbers alone do not verify chemistry.
+- **Chemistry choices live in config** (`configs/*.yml`): reaction classes, condition families,
+  salt rules, the definition of a positive. Code reads them; it does not hard-code them.
+- **One standardisation for P, U and TEST;** every row carries `std_version`.
+- **No leakage:** evaluation sets never enter training; check overlap by InChIKey and report it.
+  Evaluation splits keep test substrates unseen.
+- **Samples first:** develop on `samples_2k/`; run full corpora only after the sample run is checked.
+
+## 7. Tests
+
+- **Tests first, then code.** Every module in `src/` has tests in `tests/`.
+- Chemistry tests are named after the case: `test_naoh_covalent_equals_ionic`,
+  `test_k2co3_differs_from_cs2co3`, `test_orderly_row_without_temperature`.
+- Fixtures are a few hand-checked rows from **open** sources only, small (under about 100 KB).
+- **Nothing merges that its author cannot explain line by line.**
+
+## 8. Working agreement
+
+- Changes reach `main` only through a reviewed pull request (now PR #1, see §2).
+- **Check the numbers before writing code.** Before code is written for a set of reactions, count
+  them in the real data (rows, cases, edge cases) and agree on the rule from those counts. The code
+  then implements the agreed rule and nothing more.
+- **As little code as possible, as robust as possible.** Prefer the simplest version that handles
+  the cases actually present in the data; fail loudly (a clear error) on input outside them instead
+  of guessing. No option, branch or helper for a case the data does not have.
+- `LAB_JOURNAL.md` is append-only: new dated entry at the top, written in the first person (context → done →
+  result → interpretation → next). Never rewrite an old entry.
+- Decisions: `docs/decisions/NNN-title.md`; accepted ones are superseded, never rewritten.
+- Literature notes: one file per paper in `docs/literature/notes/`.
+- Negative results are recorded. Never tune on TEST.
+- Reproducibility: raw data immutable; derived data regenerated by scripts with a provenance
+  record; fixed seeds; no secrets.
+- Personal Claude memory is not shared; anything a collaborator needs goes in this repo.
+
+## 9. Data and licences
+
+- Raw HTE sets (Chemlex, HiTEA) and literature corpora are **never committed**; read in place.
+- Open: ORD, ORDerly, USPTO, CHORISO, CJHIF, NiCOlit (MIT).
+- **Chemlex is CC BY-NC-ND 4.0:** no row of it or table derived from it is shared or committed,
+  test fixtures included; we publish only the code that rebuilds them from the original file.
+- **Not open, only under `private/`** (git-ignored at any depth), never in tests, never published:
+  Pistachio (`licensed`), the inventory (`internal`, ADR 004), Chemlex (`noncommercial`, ADR 009,
+  labels and validation/test too), and all derived from each. `io.write_table` enforces it as an
+  allow-list — outside `private/` a licence column may hold only `open` — and `io.strictest_licence`
+  is the one place the merge rule lives. Details and the one known gap: ADR 009.
+- Everything the paper ships must be reproducible from open sources alone; it is published from a
+  fresh repository without the prototype history (ADR 005).
+
+## 10. Layout (only what exists — update in the same commit when it changes)
+
+    src/platepu/      package, one subpackage per stage: ingest/, reactions/ (smiles, mapping, clean),
+                      classify/, standardise/, positives/, benchmarks/, library/, features/, score/; io.py writes outputs
+    tests/            tests for every module
+    docs/design/      rebuild plan and stage designs; rebuild.md holds the target layout
+    docs/decisions/   decision records (ADRs), NNN-title.md
+    docs/literature/notes/  one note per paper (agent summaries say so in their header)
+    configs/          chemistry and pipeline choices (YAML), e.g. the rxnutils pipeline
+    scripts/          thin entry points per stage, and exploration scripts until replaced;
+                      counts/ holds the count scripts publication depends on (ADR 011)
+    LAB_JOURNAL.md    lab notebook (append-only)
+    .claude/agents/   subagent definitions (§11); .claude/settings.json holds the permission rules
+
+**Pipeline** (ADR 002, `docs/design/rebuild.md`): ingest → reaction SMILES → RXNMapper → rxnutils
+clean → classify → standardise → positives / benchmark labels. Only the adapter depends on the
+source; a reaction class is a YAML file in `configs/classes/`. Stage tables live outside the repo in
+`Datasets/derived/<source>/`.
+
+## 11. Agents (`.claude/agents/`)
+
+The main session plans, writes code in `src/` and `scripts/`, and talks to Luka. Ten subagents do the
+rest; each may write only where its row says. **No agent pushes, installs, or writes to GitHub.**
+
+| agent | when | may write |
 |---|---|---|
-| Positives **P** | synthetic — biased subsample of an HTE set | **real literature reactions** (ORD / Pistachio / USPTO) |
-| Unlabeled **U** | the held-out remainder of the same HTE set | **virtual** — enumerated combinatorial substrate grid |
-| Bias model | imposed, known | **real reporting bias**, unknown and unmodelled |
-| Task | yield regression | **feasibility → plate design** |
-| Validation | retrospective | retrospective **+ prospective wet-lab HTE** |
-| Applies to | classes with an HTE dataset | **classes with no HTE dataset at all** |
+| `repo-scout` | a change touches >1 module; "where / how does X" | nothing |
+| `stage-architect` | a stage, adapter, class, model step or dependency `docs/design/*.md` lacks | nothing |
+| `data-counter` | before coding any rule, filter, SMARTS, family or threshold | `scratch/` |
+| `chem-verifier` | before code: failing tests; after code: the four gates + grid image | `tests/` |
+| `pr-reviewer` | after GREEN, before guardian; or "review PR N" | nothing |
+| `architecture-reviewer` | before a stage PR is ready; new subpackage; module near 300 lines | nothing |
+| `data-guardian` | before every commit; any change to `io.py`, `.gitignore`, paths, adapters, splits | nothing (PASS/BLOCK) |
+| `journal-scribe` | end of a piece of work; decision; paper read; file or folder added | `LAB_JOURNAL.md` (prepend), `docs/`, §10 |
+| `git-curator` | only when Luka says "commit" or asks for a PR body | `git add <path>`, `git commit`, `scratch/pr_body.md` |
+| `repo-steward` | before a PR is marked ready; "audit the repo" | `scratch/github/` |
 
-The last row is the point. A method that needs an existing HTE dataset cannot help you on a
-reaction where you have none — which is exactly when you would want it.
+**Order for a piece of work:** scout → counter → architect (if the design is missing) → Luka agrees
+the rule → verifier writes tests → main session writes code → verifier runs the gates → pr-reviewer →
+guardian → scribe → git-curator (on Luka's word) → repo-steward before "ready". A guardian BLOCK or a
+reviewer BLOCKER stops the commit. Agents never read the Chemlex test side or HiTEA.
 
----
-
-## 2. Preliminary result that motivates the paper
-
-**Chemlex amide coupling.** P = 258,645 literature amide pairs mined from ORD + Pistachio;
-U = virtual 272 × 231 substrate grid (62,832 pairs); TEST = 2,234 held-out reactions, 35.5 % feasible.
-**Both test substrates unseen** (inductive — test substrates removed from U). Zero target labels ever
-used in training.
-
-| ranking model | TEST ROC-AUC | AP |
-|---|---|---|
-| random | 0.500 | 0.355 |
-| positives-only (similarity to 258k known positives) | 0.671 | 0.507 |
-| **literature-PU — ours (zero target labels)** | **0.768** | **0.621** |
-| in-domain supervised ceiling (trained on *real* Chemlex labels) | 0.733 | — |
-
-Plate hit rate, top 25 % of the ranked matrix: **61.8 %** vs **35.5 %** random — a **1.74×** uplift.
-
-Two things make this publishable rather than incremental:
-
-1. **The literature-PU model beats the in-domain supervised ceiling** trained on real labels for that
-   very dataset. 258k diverse literature positives out-signal 4,960 in-domain rows once the test
-   substrates are novel. In PAYN the PU model sits *between* the positives-only and true-label
-   references; here it tops both.
-2. **Beating positives-only by +0.097 AUC shows the virtual U carries real signal** — the model is
-   not merely saying "this looks like a reaction someone already ran".
-
-**Honest limits (these define the remaining work).** This is one reaction class. The same pipeline on
-HiTEA Buchwald–Hartwig reached only 0.709 (n = 36, wide CIs), and the beyond-SCAR `prop_ips` variant
-that won on amide (+0.024) **lost** on BH (−0.033) — so the method's advantage is not yet shown to be
-general, and no claim of generality should be made from Chemlex alone. See `LAB_JOURNAL.md`
-(2026-07-10 through 2026-07-13) and `RESULTS.md`.
-
----
-
-## 3. The plan to a JACS-level paper
-
-**The gap:** retrospective evidence on public datasets, however clean, is a benchmark result. What
-elevates it is showing the model works **prospectively, on a reaction class with no HTE data**, in a
-real plate.
-
-**And there is no retrospective route left.** A systematic survey (`Future_datasets.md`) found that
-**no public dataset besides Chemlex and HiTEA** has a diverse product matrix + genuinely measured
-negatives + literature-common conditions. The near-misses fail structurally, not incidentally:
-Perera/Reizman Suzuki vary handle and conditions on a fixed coupling (≈ one product, not a matrix);
-AbbVie's 23k-product Suzuki corpus is structure-redacted; AstraZeneca ELN negatives are
-missing-not-failed; LSF borylation is mono-molecular. So the retrospective well is dry — the next
-test set has to be **made in the lab**. That is an argument *for* the experiment, and it belongs in
-the paper.
-
-**Validation hierarchy** — each tier is a stronger claim than the last:
-
-```
-validation split (optimise freely)
-  → held-out public HTE test, touched once (Chemlex ✅, HiTEA ✅)
-    → PROSPECTIVE WET-LAB HTE PLATE          ← the paper's core experiment
-```
-
-**Core experiment (wet lab, Jan).** For a reaction class where **no literature HTE dataset exists**:
-1. Enumerate the virtual substrate matrix from real in-house building-block stock.
-2. Mine literature positives **P** for that class; score the matrix with the literature-PU model.
-3. Run **model-picked vs random** substrate selections on plate, **under literature conditions**
-   (conditions taken from the mined literature consensus, not re-optimised per substrate — the
-   model predicts substrate-intrinsic feasibility, so the conditions must be held fixed and general).
-4. Report the hit-rate difference. A worst-picked arm, if capacity allows, brackets the effect and
-   guards against "the model just picked easy chemistry".
-
-**Why random is the right control:** it is what a chemist without the model actually does when
-laying out an exploratory plate. Model-vs-random *is* the claim.
-
-**Design notes that protect the result:** substrate selections must be structurally disjoint where
-possible; the model is frozen and scores committed **before** any well is run (pre-registration in
-the lab notebook); plate position/edge effects randomised across arms.
-
-**Open scientific questions to resolve on the way:**
-- Which reaction classes have enough literature signal? (`PROSPECTIVE_REACTION_CONDITION_GROUPING.md`)
-- Does the amide result generalise, or is it class-specific? (the HiTEA discrepancy says: not yet known)
-- Does conditioning on a literature-consensus condition cluster beat a single fixed condition set?
-- Is the SCAR assumption the binding constraint, and do beyond-SCAR methods help reliably? (so far: no)
-
----
-
-## 4. Working agreement
-
-- **`LAB_JOURNAL.md` is append-only.** New dated, author-tagged entry at the *top*. Never rewrite an
-  existing entry. Log every experiment: context/hypothesis → what I did → result → interpretation → next.
-  This is the record a paper's SI is reconstructed from; treat it as a lab notebook, because it is one.
-- **Decisions** get their own file: `docs/decisions/NNN-title.md` (ADR-style).
-- **Literature notes:** one file per paper in `docs/literature/notes/<prefix>-<slug>.md`.
-- **Negative results are recorded, not discarded.** The prop_ips-fails-on-BH entry is exactly as
-  valuable as the win — it is what keeps the paper's claims defensible under review.
-- **Never tune on TEST.** Model selection on validation only; test touched once. Any result produced
-  by changing evaluation after seeing a score is not a result.
-- Personal Claude memory is *not* shared with collaborators — anything a collaborator needs goes in
-  this repo.
-
-**Provenance.** This repo was split from a shared Glorius-group working tree; the foundational
-commits are by **Florian Boser** and remain attributed to him in `git log`. The earlier work was done
-during a hackathon that was **not submitted**; that framing is retired and no longer applies. What
-carries forward is the science, not the event.
-
----
-
-## 5. Coding standards (non-negotiable)
-
-- **Package manager: `uv`.** Never bare `pip`/`python`. Use `uv run python ...`, `uv add`, `uv sync`.
-- **Python 3.13** (`pyproject.toml`, `requires-python >=3.13`).
-- **Object-oriented, typed, documented.** Full annotations; **Google-style docstrings**; comments for
-  non-obvious logic. `scripts/` and `scripts_JSP/` hold thin CLI entrypoints that call into `src/`.
-- **Quality gates:** `uv run ruff check . && uv run ruff format . && uv run mypy src && uv run pytest`
-- **Reproducibility:** raw data immutable; derived data regenerated by scripts with a provenance
-  record; fixed seeds; no secrets. Every number in `LAB_JOURNAL.md` must trace to a file in `artifacts/`.
-
----
-
-## 6. Data map
-
-| Path | What it is |
-|---|---|
-| `datasets/raw/HiTEA`, `datasets/raw/Chemlex` | **Immutable** source HTE datasets (36 MB). Not in git — irreplaceable, back up separately. |
-| `datasets/processed/amide_corpus_ord.*` | Amide positives mined from ORD + ORDerly — 194,625 detected → 52,968 unique pairs. **Open-licensed**, publishable. |
-| `datasets/processed/private/` | **Pistachio / CHORISO / USPTO / ORDerly parsed corpora (597 MB). LICENSED — never commit, never publish.** |
-| `datasets/processed/features/` | Feature caches (ECFP/DRFP, ZINC availability). Regenerable. |
-| `final_datasets/` | Assembled TEST / P / U. `final_datasets/private/` is licensed — never publish. |
-| `artifacts/` | Experiment outputs — **tracked in git** (~2 MB); every journal number traces here. |
-
-> ⚠️ **`DRFP`/`QM` columns in the original curated CSV are truncated NumPy string reprs** — not usable
-> as features. Recompute DRFP from SMILES; RDKit for descriptors. See `docs/datasets.md`.
-
-**Licensing discipline matters for publication:** results derived from Pistachio can be *reported*,
-but the corpus cannot be redistributed. Anything that must ship with the paper has to be reproducible
-from **ORD/ORDerly/USPTO (open)** — which is why `amide_corpus_ord.*` is kept separate from `private/`.
-
----
-
-## 7. Directory layout
-
-```
-CLAUDE.md                 # this charter
-LAB_JOURNAL.md            # append-only experiment log (the lab notebook)
-RESULTS.md                # consolidated retrospective results
-PROSPECTIVE_PLATE_PLAN.md # ← the wet-lab validation experiment (paper's core)
-PROSPECTIVE_REACTION_CONDITION_GROUPING.md  # picking the reaction class + condition cluster
-Future_datasets.md        # CLOSED survey: why no public dataset is left to test on
-src/pubench/              # PU benchmark: models, features, mining, eval  (primary)
-src/bhpu/                 # earlier pipeline: chem, features, leakage, space  (foundational)
-scripts_JSP/              # CLI entrypoints + SLURM sbatch files
-artifacts/                # experiment outputs (tracked)
-docs/decisions/           # ADRs
-docs/literature/notes/    # one note per paper (25)
-```
-
-**SLURM:** heavy compute goes to the cluster at `--nice=1000000`. See `docs/slurm.md`.
-
----
-
-## 8. Current status
-
-**Phase: retrospective evidence secured; moving to prospective validation.**
-
-Done — literature-PU pipeline (mining → virtual U → features → PU models → frozen eval), 9 PU methods
-benchmarked, Chemlex amide win over the in-domain ceiling, HiTEA BH replication, leakage audits,
-beyond-SCAR arm (negative result).
-
-Next, in order:
-1. **Pick the reaction class** for the wet-lab plate — needs the ORD/Pistachio/USPTO class × condition
-   catalogue (`PROSPECTIVE_REACTION_CONDITION_GROUPING.md`). Requirement: strong literature signal,
-   **no existing HTE dataset**, cheap stable stock.
-2. **Freeze and commit** model + scores before running anything.
-3. **Run model-picked vs random plates** under literature conditions.
-4. **Draft.** Figure 1 = the Chemlex "beats the in-domain ceiling" panel; Figure 2 = the prospective
-   plate result. Target JACS.
+**Provenance.** Split from a shared Glorius-group working tree; foundational commits by
+**Florian Boser** remain attributed in `git log`.
